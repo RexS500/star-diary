@@ -83,3 +83,55 @@
   .template-card-actions{justify-content:flex-end}
   .template-delete{min-height:40px}
 }
+
+/* Reward settings cards and reusable built-in/uploaded icon picker */
+.reward-settings-help{margin:-6px 0 16px;color:#5f6f82;font-size:13px;line-height:1.6}
+.reward-settings-list{display:grid;gap:14px}
+.reward-settings-card{min-width:0;max-width:100%;padding:16px;border:1px solid #d9e4f0;border-radius:14px;background:#f8fbff}
+.reward-settings-card h3{margin:0 0 14px;color:#334155;font:800 15px/1.4 "Microsoft JhengHei",sans-serif;overflow-wrap:anywhere}
+.reward-settings-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(140px,.6fr);gap:14px 16px;align-items:end;min-width:0}
+.reward-media-field{grid-column:1/-1;min-width:0}
+.reward-control-label{display:block;color:#53657a;font-size:12px;font-weight:800}
+.reward-media-control{display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;align-items:start;min-width:0;margin-top:7px}
+.reward-current-preview{width:64px;height:64px;display:grid;place-items:center;overflow:hidden;border:1px solid #cbd8e6;border-radius:12px;background:#fff;font-size:31px}
+.reward-current-preview img{display:block;width:100%;height:100%;object-fit:cover}
+.reward-media-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;min-width:0}
+.reward-icon-picker{flex:1 1 270px;min-width:0;max-width:100%}
+.reward-icon-picker summary{min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 11px;border:1px solid #cbd8e6;border-radius:10px;background:#fff;color:var(--ink);cursor:pointer;list-style:none}
+.reward-icon-picker summary::-webkit-details-marker{display:none}
+.reward-icon-picker[open] summary{border-color:var(--g);box-shadow:0 0 0 3px #dbeafe}
+.picker-current{display:flex;min-width:0;align-items:center;gap:8px}
+.picker-current img{width:32px;height:32px;flex:0 0 32px;border-radius:7px;object-fit:cover}
+.picker-current b{min-width:32px;font-size:22px;text-align:center}
+.picker-current>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:800}
+.picker-prompt{flex:0 0 auto;color:var(--g);font-size:12px;font-weight:800;white-space:nowrap}
+.reward-icon-menu{max-height:min(380px,55vh);overflow-y:auto;margin-top:8px;padding:12px;border:1px solid #cbd8e6;border-radius:12px;background:#fff;box-shadow:0 8px 22px #18324f18}
+.reward-icon-menu h4{margin:0 0 8px;color:#53657a;font-size:12px}
+.reward-icon-menu h4:not(:first-child){margin-top:14px;padding-top:12px;border-top:1px solid #e5edf6}
+.builtin-icon-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.uploaded-icon-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.builtin-icon-options button,.uploaded-icon-options button{width:100%;min-width:0;min-height:46px;display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid #d9e4f0;border-radius:9px;background:#f8fbff;color:var(--ink);text-align:left;font-family:inherit;font-size:13px;font-weight:700}
+.builtin-icon-options button:hover,.uploaded-icon-options button:hover{background:#eef5fd}
+.builtin-icon-options button[aria-pressed="true"],.uploaded-icon-options button[aria-pressed="true"]{border-color:var(--g);background:#eaf3fd;box-shadow:inset 0 0 0 1px var(--g)}
+.builtin-option-icon{width:28px;flex:0 0 28px;font-size:23px;text-align:center}
+.uploaded-icon-options img{width:40px;height:40px;flex:0 0 40px;border-radius:8px;object-fit:cover;background:#f0f4fa}
+.uploaded-icon-options span{min-width:0;overflow-wrap:anywhere}
+.icon-library-empty{margin:0;padding:10px;border-radius:8px;background:#f4f7fb;color:#6b7d91;font-size:12px;line-height:1.5}
+.reward-upload-action{min-height:48px;display:flex!important;align-items:center;justify-content:center;margin:0!important;padding:10px 13px;border:1px solid #b9cce3;border-radius:10px;background:#eef5fd;color:var(--g);font-size:14px!important;font-weight:900!important;cursor:pointer;white-space:nowrap}
+.reward-settings-fields>label{display:block;min-width:0;margin:0;color:#53657a;font-size:12px;font-weight:800}
+.settings-card .reward-settings-fields>label input{display:block;width:100%;min-width:0;min-height:44px;margin:7px 0 0;padding:10px 12px;border:1px solid #cbd8e6;border-radius:9px;background:#fff;color:var(--ink);font-family:inherit;font-size:16px}
+.settings-card .reward-settings-fields>label input:focus{border-color:var(--g);outline:3px solid #dbeafe;outline-offset:0}
+.reward-settings-actions{grid-column:1/-1;display:flex;justify-content:flex-end;min-width:0}
+.reward-settings-delete{min-height:40px;padding:8px 11px;border:1px solid #f4d3cf;border-radius:8px;background:#fef3f2;color:var(--r);font-size:13px;font-weight:800}
+.reward-settings-delete:hover,.reward-settings-delete:focus-visible{background:#fde8e6;outline:2px solid #efb8b3;outline-offset:2px}
+@media(max-width:560px){
+  .reward-settings-card{padding:14px}
+  .reward-settings-fields{grid-template-columns:minmax(0,1fr);gap:12px}
+  .reward-media-field,.reward-settings-actions{grid-column:auto}
+  .reward-media-control{grid-template-columns:minmax(0,1fr)}
+  .reward-current-preview{width:64px;height:64px}
+  .reward-media-actions{display:grid;grid-template-columns:minmax(0,1fr)}
+  .reward-icon-picker,.reward-upload-action{width:100%;max-width:100%}
+  .builtin-icon-options,.uploaded-icon-options{grid-template-columns:minmax(0,1fr)}
+  .reward-settings-delete{min-height:44px}
+}
