@@ -93,12 +93,29 @@ export default function App() {
     function quick(t: Template) { const amount = t.type === "deduct" ? -t.amount : t.amount; addEntry(t.title, amount, t.type); }
     function specialStock(list:Reward[],title:string,amount:number){const found=list.find(r=>r.name.trim()===title.trim());const next=found?list.map(r=>r.id===found.id?{...r,stock:Math.max(0,r.stock+amount)}:r):amount>0?[...list,{id:crypto.randomUUID(),icon:"🎁",name:title.trim(),cost:0,stock:amount,source:"special" as const}]:list;return next.filter(r=>r.stock>0)}
     function addEntry(title: string, amount: number, type: Entry["type"]) { const pending=role==="孩子",e:Entry = { id: crypto.randomUUID(), childId: cid, title, amount: Math.abs(amount), type, date: now(),status:pending?"pending":"completed" }, delta=pending||type==="special"?0:amount, next = { ...data, entries: [e, ...data.entries], children: data.children.map(c => c.id === cid ? { ...c, stars: Math.max(0, c.stars + delta) } : c),specialRewards:!pending&&type==="special"?specialStock(data.specialRewards,title,Math.abs(amount)):data.specialRewards }; if(pending)submitPending("child_entry",e,next);else persist(next); }
+    async function normalizeJpeg(f:File){
+        const bitmap=await createImageBitmap(f,{imageOrientation:"from-image"});
+        const scale=Math.min(1,1600/Math.max(bitmap.width,bitmap.height)),width=Math.max(1,Math.round(bitmap.width*scale)),height=Math.max(1,Math.round(bitmap.height*scale));
+        const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
+        const context=canvas.getContext("2d");if(!context){bitmap.close();throw new Error("無法處理圖片")}
+        context.drawImage(bitmap,0,0,width,height);bitmap.close();
+        const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(result=>result?resolve(result):reject(new Error("無法轉換圖片")),"image/jpeg",0.86));
+        const base=f.name.replace(/\.[^.]+$/,"")||"photo";
+        return new File([blob],`${base}.jpg`,{type:"image/jpeg",lastModified:Date.now()});
+    }
     async function uploadImage(f:File,kind:"avatar"|"reward"){
-        if(!f.type.startsWith("image/")){say("請選擇圖片檔案");return null}
-        if(f.size>8*1024*1024){say("圖片請小於 8 MB");return null}
+        const extension=f.name.split(".").pop()?.toLowerCase()||"",inferredType:{[key:string]:string}={jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",webp:"image/webp",gif:"image/gif"};
+        if((f.type&&!f.type.startsWith("image/"))||(!f.type&&!inferredType[extension])){say("請選擇 JPG、JPEG、PNG 或 WebP 圖片");return null}
+        let uploadFile=f.type?f:new File([f],f.name,{type:inferredType[extension],lastModified:f.lastModified});
+        const isJpeg=uploadFile.type==="image/jpeg"||uploadFile.type==="image/jpg"||extension==="jpg"||extension==="jpeg";
+        if(isJpeg){
+            say("正在處理 JPEG 圖片…");
+            try{uploadFile=await normalizeJpeg(uploadFile)}catch{say("這張 JPEG 無法讀取，請換一張圖片再試");return null}
+        }
+        if(uploadFile.size>8*1024*1024){say("圖片請小於 8 MB");return null}
         say("圖片上傳中…");
         try{
-            const fd=new FormData();fd.append("file",f);fd.append("kind",kind);
+            const fd=new FormData();fd.append("file",uploadFile);fd.append("kind",kind);
             const res=await fetch("/api/media",{method:"POST",body:fd});
             const x=await res.json().catch(()=>({}));
             if(!res.ok||typeof x.url!=="string"){say(x.error||"圖片上傳失敗");return null}
