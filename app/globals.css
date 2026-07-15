@@ -63,3 +63,23 @@
   .analytics-title-actions button{width:100%}
   .analytics-title-actions small{text-align:right}
 }
+
+/* Quick indicator settings: soft independent cards without affecting the reward editor */
+.template-card-list{display:grid;gap:14px}
+.template-settings-card{position:relative;max-width:100%;min-width:0;padding:16px;border:1px solid #e6dba9;border-left:3px solid #e6b83f;border-radius:14px;background:#fffdf5}
+.template-settings-card.template-deduct{border-color:#f1cfcb;border-left-color:#d87068;background:#fff8f7}
+.template-settings-card.template-special{border-color:#dcd8ef;border-left-color:#8b7bc1;background:#faf9ff}
+.template-settings-card h3{margin:0 0 14px;color:#334155;font:800 15px/1.4 "Microsoft JhengHei",sans-serif;overflow-wrap:anywhere}
+.template-card-fields{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(0,1.6fr);gap:14px 16px;align-items:end;min-width:0}
+.quick-indicator-settings .template-field{display:block;min-width:0;margin:0;color:#53657a;font-size:12px;font-weight:800}
+.quick-indicator-settings .template-field input,.quick-indicator-settings .template-field select{display:block;width:100%;min-width:0;min-height:44px;margin:7px 0 0;padding:10px 12px;border:1px solid #cbd8e6;border-radius:9px;background:#fff;color:var(--ink);font-family:inherit;font-size:16px}
+.quick-indicator-settings .template-field input:focus,.quick-indicator-settings .template-field select:focus{border-color:var(--g);outline:3px solid #dbeafe;outline-offset:0}
+.template-card-actions{display:flex;min-width:0;min-height:44px;align-items:flex-end;justify-content:flex-end}
+.template-delete{width:auto;min-height:38px;padding:8px 11px;border:1px solid #f4d3cf;border-radius:8px;background:#fef3f2;color:var(--r);font-size:13px;font-weight:800}
+.template-delete:hover,.template-delete:focus-visible{background:#fde8e6;outline:2px solid #efb8b3;outline-offset:2px}
+@media(max-width:560px){
+  .template-settings-card{padding:14px}
+  .template-card-fields{grid-template-columns:minmax(0,1fr);gap:12px}
+  .template-card-actions{justify-content:flex-end}
+  .template-delete{min-height:40px}
+}
