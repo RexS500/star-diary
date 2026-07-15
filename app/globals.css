@@ -36,3 +36,30 @@
 .star-picker button:focus-visible{outline-color:var(--g)}.cancel-action:focus-visible{outline-color:#1d4ed8}
 .record-actions{grid-template-columns:1fr;gap:10px}.record-actions .save,.record-actions .cancel-action{width:100%;margin:0;min-height:46px}
 @media(max-width:560px){.brand-logo{width:40px;height:40px;flex-basis:40px;border-radius:10px}}
+
+/* Mobile settings rows: keep labels and editable values readable in Safari */
+@media(max-width:560px){
+  .settings-card.wide .table-head,
+  .settings-card.wide .edit-list>div{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .settings-card.wide .edit-list>div>:not(.file-input){width:100%;min-width:0}
+  .settings-card.wide .edit-list>div>button{grid-column:auto;padding:10px}
+}
+.confirmation-note{margin:4px 0 0;color:#5f6f82;font-size:13px;line-height:1.6}
+
+/* Analytics refresh controls and per-item stacked bars */
+.analytics-title-actions{display:grid;grid-template-columns:auto auto;gap:8px;align-items:center;justify-items:end}
+.analytics-title-actions small{grid-column:1/-1;color:#5f6f82;font-size:11px}
+.analytics-title-actions .refresh-button{border:1px solid #b9cce3;background:#f1f6fc;color:var(--g)}
+.chart-legend{flex-wrap:wrap}
+.chart-legend i{flex:0 0 11px}
+.chart-up .add-stack{position:relative;width:30px;min-height:4px;display:flex;flex-direction:column-reverse}
+.chart-up .add-stack .add-segment{position:static;display:block;width:100%;min-height:0;border-radius:0;flex:0 0 auto}
+.chart-up .add-stack .add-segment:first-of-type{border-radius:0 0 4px 4px}
+.chart-up .add-stack .add-segment:last-of-type{border-radius:6px 6px 0 0}
+.chart-up .add-stack .add-segment:only-of-type{border-radius:6px 6px 0 0}
+.chart-up .add-stack>b{z-index:1}
+@media(max-width:560px){
+  .analytics-title-actions{width:100%;grid-template-columns:1fr 1fr;justify-items:stretch}
+  .analytics-title-actions button{width:100%}
+  .analytics-title-actions small{text-align:right}
+}
