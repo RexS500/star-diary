@@ -11,10 +11,11 @@ const crc32 = (data: Uint8Array) => { let crc = 0xffffffff; for (const value of 
 
 function zip(files: Record<string, string>) {
     const localParts: Uint8Array[] = [], centralParts: Uint8Array[] = []; let offset = 0;
+    const dosTime = 0, dosDate = 0x0021;
     for (const [name, content] of Object.entries(files)) {
         const nameData = encoder.encode(name), data = encoder.encode(content), checksum = crc32(data);
-        const local = merge([bytes(0x04034b50, 4), bytes(20, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(checksum, 4), bytes(data.length, 4), bytes(data.length, 4), bytes(nameData.length, 2), bytes(0, 2), nameData, data]);
-        const central = merge([bytes(0x02014b50, 4), bytes(20, 2), bytes(20, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(checksum, 4), bytes(data.length, 4), bytes(data.length, 4), bytes(nameData.length, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(0, 4), bytes(offset, 4), nameData]);
+        const local = merge([bytes(0x04034b50, 4), bytes(20, 2), bytes(0, 2), bytes(0, 2), bytes(dosTime, 2), bytes(dosDate, 2), bytes(checksum, 4), bytes(data.length, 4), bytes(data.length, 4), bytes(nameData.length, 2), bytes(0, 2), nameData, data]);
+        const central = merge([bytes(0x02014b50, 4), bytes(20, 2), bytes(20, 2), bytes(0, 2), bytes(0, 2), bytes(dosTime, 2), bytes(dosDate, 2), bytes(checksum, 4), bytes(data.length, 4), bytes(data.length, 4), bytes(nameData.length, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(0, 2), bytes(0, 4), bytes(offset, 4), nameData]);
         localParts.push(local); centralParts.push(central); offset += local.length;
     }
     const central = merge(centralParts), end = merge([bytes(0x06054b50, 4), bytes(0, 2), bytes(0, 2), bytes(centralParts.length, 2), bytes(centralParts.length, 2), bytes(central.length, 4), bytes(offset, 4), bytes(0, 2)]);
