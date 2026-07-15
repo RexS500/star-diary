@@ -24,3 +24,15 @@
 .star-picker button:hover,.star-picker button:focus-visible{background:#f0f5fb;outline-color:#a8c4e3}
 .reward-icon,.reward-icon img,.crop-frame{background:#f0f4fa}.analytics-row.header{background:#f2f6fb}
 .record-actions{display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:13px}.record-actions .save{margin-top:0;min-height:44px}.cancel-action{min-height:44px;border:0;border-radius:9px;background:var(--r);color:#fff;font-weight:900}.cancel-action:focus-visible{outline:3px solid #f1bab6;outline-offset:2px}
+
+/* Contrast-managed blue and red palette */
+:root{--g:#2563a6;--m:#e8f1fb;--c:#f5f8fc;--r:#b42318;--ink:#223044}
+.brand-logo{display:block;width:48px;height:48px;flex:0 0 48px;object-fit:cover;border:2px solid #d8e3ef;border-radius:12px;box-shadow:0 2px 8px #18324f22}.brand .brand-label{background:transparent;color:inherit;padding:0;border-radius:0}
+.topbar nav button,.role-switch button,.eyebrow,.hello p,.card-title p,.quick-card p,.section-head p,.entry-copy small,.bars small,.star-amount small,.crop-help,.crop-note,.analytics-title p,.summary-grid span,.chart-legend span,.chart-day small,.table-head,.analytics-row.header,.empty{color:#5f6f82}
+.confirm-box,.counter,.rule{background:#f1f5f9}.star-picker button{color:#64748b}.chart-up{border-bottom-color:#94a3b8}
+.template-picks button.deduct-pick,.quick-picks button.deduct-pick{background:#fef3f2;border-color:#f2b8b5;color:var(--r)}
+.delete,.delete-child,.edit-list button,.quick-card .minus,.toggle .bad{background:#fef3f2;color:var(--r)}
+.summary-add{color:#8a5a00!important}.chart-up b{color:#8a5a00}
+.star-picker button:focus-visible{outline-color:var(--g)}.cancel-action:focus-visible{outline-color:#1d4ed8}
+.record-actions{grid-template-columns:1fr;gap:10px}.record-actions .save,.record-actions .cancel-action{width:100%;margin:0;min-height:46px}
+@media(max-width:560px){.brand-logo{width:40px;height:40px;flex-basis:40px;border-radius:10px}}
