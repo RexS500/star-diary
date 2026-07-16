@@ -141,6 +141,31 @@ export function taskProgress(records: DailyTaskRecord[]): TaskProgress {
     return { completed, total: effective.length, percentage: effective.length ? Math.round(completed / effective.length * 100) : null };
 }
 
+export function dailyTaskDayView(
+    records: DailyTaskRecord[],
+    definitions: Pick<DailyTaskDefinition, "id" | "childId" | "sortOrder">[],
+    childId: string,
+    dateKey: string,
+) {
+    const sortOrder = new Map(
+        definitions
+            .filter(task => task.childId === childId)
+            .map(task => [task.id, task.sortOrder]),
+    );
+    const todayRecords = records
+        .filter(record => record.childId === childId && record.date === dateKey)
+        .sort((left, right) =>
+            (sortOrder.get(left.definitionId) ?? 999) - (sortOrder.get(right.definitionId) ?? 999)
+            || left.titleSnapshot.localeCompare(right.titleSnapshot, "zh-TW"),
+        );
+    return {
+        records: todayRecords,
+        pending: todayRecords.filter(record => record.status === "pending" || record.status === "pending_approval"),
+        finished: todayRecords.filter(record => record.status === "completed" || record.status === "skipped"),
+        progress: taskProgress(todayRecords),
+    };
+}
+
 export function goalResult(progress: TaskProgress, settings: DailyTaskSettings) {
     if (!progress.total) return { evaluable: false, met: false, required: 0 };
     if (settings.goalMode === "all") return { evaluable: true, met: progress.completed === progress.total, required: progress.total };

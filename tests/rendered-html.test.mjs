@@ -26,6 +26,10 @@ test("daily tasks are connected to settings, challenge navigation and server act
   assert.match(home, /今日獲得/);
   assert.match(home, /本週完成率/);
   assert.match(home, /連續達標/);
+  assert.match(home, /dailyTaskDayView/);
+  assert.match(home, /task-summary-progress/);
+  assert.match(home, /今天沒有安排每日任務/);
+  assert.doesNotMatch(home, /刷新任務|refreshTasks/);
   assert.match(route, /child_daily_task_complete/);
   assert.match(route, /parent_daily_task_action/);
   assert.match(route, /sourceType:\s*"daily_task"/);
