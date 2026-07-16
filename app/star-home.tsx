@@ -19,6 +19,19 @@ import {
     type DailyTaskSettings,
     type DailyTaskSettingsMap,
 } from "./daily-task-logic";
+import {
+    entryAnalyticsDateKey,
+    formatRedemptionTime,
+    formatWeekRange,
+    getWeekPeriods,
+    getWeeklyRedemptionSummary,
+    getWeeklyStarAnalytics,
+    sortRedemptionSummary,
+    type RedemptionSortKey,
+    type SortDirection,
+    type StarCategory,
+    type WeeklyStarAnalytics,
+} from "./analytics-logic";
 type Child = {
     id: string;
     name: string;
@@ -68,8 +81,15 @@ type Redeem = {
     reward: string;
     cost: number;
     date: string;
-    status?: "pending" | "completed";
+    status?: "pending" | "completed" | "cancelled" | "rejected" | "failed";
     source?: "star" | "special";
+    rewardNameSnapshot?: string;
+    costSnapshot?: number;
+    totalCost?: number;
+    quantity?: number;
+    completedAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
 };
 type State = {
     children: Child[];
@@ -238,7 +258,7 @@ function RecordModal({templates,onClose,onSave,onValidationError}:{templates:Tem
     return <div ref={backdropRef} className="modal-back record-modal-back"><section className="modal record-modal" role="dialog" aria-modal="true" aria-labelledby="record-modal-title" aria-busy={saving} onFocusCapture={focusField}><button type="button" className="close" aria-label="關閉新增紀錄" disabled={saving} onClick={onClose}>×</button><h2 id="record-modal-title">新增紀錄</h2><div className="toggle three">{RECORD_TYPES.map(item=><button type="button" key={item.value} className={t===item.value?"chosen":""} disabled={saving} onClick={()=>{setT(item.value);setN(item.value==="special"?1:0)}}>{item.label}</button>)}</div>{picks.length>0&&<div className="quick-picks"><b>快速選取</b>{picks.map(item=>{const count=Math.max(1,Math.abs(Math.floor(Number(item.amount)||1)));return <button type="button" key={item.id} className={item.type==="deduct"?"deduct-pick":""} disabled={saving} onClick={()=>{setName(item.title);setN(count)}}>{item.title} × {count}</button>})}</div>}<label>{t==="special"?"獎勵內容":"發生了什麼事？"}<input value={name} disabled={saving} onChange={event=>setName(event.target.value)} placeholder={t==="special"?"例如：冰淇淋":"例如：主動收好玩具"}/></label>{t==="special"?<label>獎勵數量<input type="number" min="1" inputMode="numeric" value={n} disabled={saving} onChange={event=>setN(Math.max(0,Math.floor(+event.target.value)))}/></label>:<div className="star-amount"><b>星星數量</b><div className={`star-picker ${t==="deduct"?"deduct":"add"}`} role="group" aria-label="選擇星星數量">{[1,2,3,4,5].map(value=><button type="button" key={value} className={n>=value?"filled":""} disabled={saving} aria-label={`${value} 顆星星`} aria-pressed={n>=value} onClick={()=>setN(value)}>{n>=value?"★":"☆"}</button>)}</div><label>其他數量<input type="number" min="1" inputMode="numeric" value={n||""} disabled={saving} placeholder="可輸入 6 顆以上" onChange={event=>setN(Math.max(0,Math.floor(+event.target.value)))}/></label>{n>0&&<small>目前選擇 {n} 顆</small>}</div>}<div className="record-actions"><button type="button" className="save" disabled={saving} onClick={()=>void save()}>{saving?"儲存中…":"儲存紀錄"}</button><button type="button" className="cancel-action" disabled={saving} onClick={onClose}>取消</button></div></section></div>;
 }
 
-function Analytics({entries,child,onRefresh}:{entries:Entry[];child:Child;onRefresh:()=>Promise<boolean>}){
+function LegacyAnalytics({entries,child,onRefresh}:{entries:Entry[];child:Child;onRefresh:()=>Promise<boolean>}){
     const [from,setFrom]=useState(inputDate(-29)),[to,setTo]=useState(inputDate()),[filter,setFilter]=useState<AnalysisFilter>("all"),[refreshing,setRefreshing]=useState(false),[lastUpdated,setLastUpdated]=useState("");
     const rows=useMemo(()=>entries.filter(e=>e.childId===child.id&&(e.status??"completed")==="completed"&&(e.type==="star"||e.type==="deduct")&&(filter==="all"||e.type===filter)).filter(e=>{const day=entryDateKey(e);return day>=from&&day<=to}).sort((a,b)=>entryTimestamp(a)-entryTimestamp(b)),[entries,child.id,from,to,filter]);
     const daily=useMemo(()=>{const map=new Map<string,{day:string;add:number;deduct:number;items:Map<string,{label:string;amount:number}>}>();for(const row of rows){const day=entryDateKey(row),item=map.get(day)||{day,add:0,deduct:0,items:new Map()};if(row.type==="star"){const key=normalizeSeriesTitle(row.title),seriesItem=item.items.get(key)||{label:row.title.trim()||"未命名項目",amount:0};seriesItem.amount+=row.amount;item.items.set(key,seriesItem);item.add+=row.amount}else item.deduct+=row.amount;map.set(day,item)}return [...map.values()].sort((a,b)=>a.day.localeCompare(b.day)).map(item=>({...item,items:[...item.items.entries()].map(([key,value])=>({key,...value,color:seriesColor(key)})).sort((a,b)=>a.label.localeCompare(b.label,"zh-TW"))}))},[rows]);
@@ -250,6 +270,126 @@ function Analytics({entries,child,onRefresh}:{entries:Entry[];child:Child;onRefr
         const url=URL.createObjectURL(new Blob([workbook],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})),link=document.createElement("a");link.href=url;link.download=`星星分析_${child.name.replace(/[\\/:*?"<>|]/g,"_")}_${from}_${to}.xlsx`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
     }
     return <div className="analytics"><section className="analytics-panel"><div className="analytics-title"><div><h2>📊 {child.name} 的星星分析</h2><p>每日加星依項目固定分色，扣星固定使用紅色；可按刷新取得跨日及其他裝置的新紀錄。</p></div><div className="analytics-title-actions"><button className="refresh-button" disabled={refreshing} onClick={refresh}>{refreshing?"刷新中…":"↻ 刷新資料"}</button><button className="primary" disabled={!rows.length} onClick={exportExcel}>匯出 Excel</button>{lastUpdated&&<small>最後更新 {lastUpdated}</small>}</div></div><div className="analytics-filters"><label>開始日期<input type="date" value={from} max={to} onChange={e=>setFrom(e.target.value)}/></label><label>結束日期<input type="date" value={to} min={from} onChange={e=>setTo(e.target.value)}/></label><label>紀錄類型<select value={filter} onChange={e=>setFilter(e.target.value as AnalysisFilter)}><option value="all">加星＋扣星</option><option value="star">只看加星</option><option value="deduct">只看扣星</option></select></label></div></section><div className="summary-grid"><article><span>加星</span><strong className="summary-add">＋{added} ★</strong></article><article><span>扣星</span><strong className="summary-deduct">−{deducted} ★</strong></article><article><span>淨星星</span><strong>{added-deducted>=0?"＋":""}{added-deducted} ★</strong></article><article><span>紀錄數</span><strong>{rows.length} 筆</strong></article></div><section className="analytics-panel"><div className="chart-legend"><b>每日星星變化</b>{series.map(item=><span key={item.key}><i style={{backgroundColor:item.color}}/>{item.label}</span>)}{deducted>0&&<span><i className="legend-deduct"/>扣星</span>}</div>{daily.length?<div className="bar-chart">{daily.map(day=>{const details=day.items.map(item=>`${item.label}加 ${item.amount}`).join("、");return <div className="chart-day" key={day.day} title={`${day.day}：${details||"無加星"}、扣 ${day.deduct}`} aria-label={`${day.day}，${details||"無加星"}，扣星 ${day.deduct}`}><div className="chart-half chart-up">{day.add>0&&<div className="add-stack" style={{height:`${Math.max(5,day.add/maximum*100)}%`}}>{day.items.map(item=><span className="add-segment" key={item.key} title={`${item.label}：${item.amount}`} style={{height:`${item.amount/day.add*100}%`,backgroundColor:item.color}}/>)}<b>{day.add}</b></div>}</div><div className="chart-half chart-down">{day.deduct>0&&<span className="deduct-bar" style={{height:`${Math.max(5,day.deduct/maximum*100)}%`}}><b>{day.deduct}</b></span>}</div><small>{day.day.slice(5).replace("-","/")}</small></div>})}</div>:<p className="empty">這個條件下沒有已完成的加扣星紀錄</p>}</section><section className="analytics-panel"><h2>分析明細</h2><div className="analytics-table"><div className="analytics-row header"><span>日期時間</span><span>類型</span><span>內容</span><span>星星</span></div>{rows.slice().reverse().map(row=><div className="analytics-row" key={row.id}><span>{row.date}</span><span className={row.type==="deduct"?"summary-deduct":"summary-add"}>{row.type==="star"?"加星":"扣星"}</span><span>{row.title}</span><strong>{row.type==="star"?"＋":"−"}{row.amount}</strong></div>)}</div></section></div>;
+}
+void LegacyAnalytics;
+
+type AnalyticsDetail = { date?: string; item: StarCategory; pinned?: boolean };
+
+const shortAnalyticsDate = (date:string) => `${Number(date.slice(5,7))}/${Number(date.slice(8,10))}`;
+const signedStars = (value:number,type:"star"|"deduct") => `${type==="star"?"+":"−"}${value} ⭐`;
+
+function WeeklySummaryCard({week,redemptionCost}:{week:WeeklyStarAnalytics;redemptionCost:number}){
+    return <article className="weekly-summary-card" aria-label={`${week.period.label}摘要`}>
+        <div className="weekly-summary-head"><div><b>{week.period.label}</b><small>{formatWeekRange(week.period)}</small></div><strong className={week.net<0?"is-negative":""}>{week.net>=0?"+":""}{week.net} ⭐</strong></div>
+        <div className="weekly-summary-metrics"><span><small>加星總數</small><b className="analytics-positive">+{week.starTotal}</b></span><span><small>扣星總數</small><b className="analytics-negative">−{week.deductTotal}</b></span><span><small>淨星星</small><b>{week.net>=0?"+":""}{week.net}</b></span><span><small>兌換消耗</small><b>{redemptionCost}</b></span></div>
+    </article>;
+}
+
+function WeeklyDivergingBarChart({week}:{week:WeeklyStarAnalytics}){
+    const [detail,setDetail]=useState<AnalyticsDetail|null>(null);
+    const maximum=Math.max(1,...week.days.flatMap(day=>[day.starTotal,day.deductTotal]));
+    const legend=[...week.starItems,...week.deductItems].sort((a,b)=>b.amount-a.amount||b.count-a.count).slice(0,8);
+    function show(date:string,item:StarCategory,pinned=false){setDetail(current=>current?.pinned&&!pinned?current:{date,item,pinned})}
+    function leave(){setDetail(current=>current?.pinned?current:null)}
+    return <article className="weekly-chart-card">
+        <div className="analytics-card-heading"><div><h3>{week.period.label}</h3><p>{formatWeekRange(week.period)}・星期日至星期六</p></div><div className="week-chart-totals"><span className="analytics-positive">+{week.starTotal}</span><span className="analytics-negative">−{week.deductTotal}</span></div></div>
+        {legend.length>0&&<div className="weekly-chart-legend" aria-label="主要項目圖例">{legend.map(item=><span key={item.key}><i style={{background:item.color}}/>{item.label}</span>)}{week.starItems.length+week.deductItems.length>legend.length&&<span>其餘項目請點柱段查看</span>}</div>}
+        <div className="weekly-diverging-chart" aria-label={`${week.period.label}每日加扣星發散式堆疊直條圖`}>
+            {week.days.map(day=><div className={`weekly-day-column ${day.isFuture?"is-future":""}`} key={day.date}>
+                <div className="weekly-chart-half is-positive">
+                    {day.starTotal>0&&<div className="weekly-bar-stack positive-stack" style={{height:`${Math.max(7,day.starTotal/maximum*100)}%`}}>{day.starItems.map(item=><button type="button" key={item.key} style={{background:item.color,flexGrow:item.amount}} aria-label={`${day.date} 加星 ${item.label} ${item.amount} 顆，共 ${item.count} 筆`} onMouseEnter={()=>show(day.date,item)} onMouseLeave={leave} onFocus={()=>show(day.date,item)} onBlur={leave} onClick={()=>show(day.date,item,true)}/>)}</div>}
+                    <b>{day.starTotal||0}</b>
+                </div>
+                <div className="weekly-zero-axis" aria-hidden="true"/>
+                <div className="weekly-chart-half is-negative">
+                    {day.deductTotal>0&&<div className="weekly-bar-stack negative-stack" style={{height:`${Math.max(7,day.deductTotal/maximum*100)}%`}}>{day.deductItems.map(item=><button type="button" key={item.key} style={{background:item.color,flexGrow:item.amount}} aria-label={`${day.date} 扣星 ${item.label} ${item.amount} 顆，共 ${item.count} 筆`} onMouseEnter={()=>show(day.date,item)} onMouseLeave={leave} onFocus={()=>show(day.date,item)} onBlur={leave} onClick={()=>show(day.date,item,true)}/>)}</div>}
+                    <b>{day.deductTotal?`−${day.deductTotal}`:"0"}</b>
+                </div>
+                <div className="weekly-day-label"><strong>{day.weekday}</strong><small>{shortAnalyticsDate(day.date)}</small>{day.isFuture&&<em>未來</em>}</div>
+            </div>)}
+        </div>
+        {detail&&<div className="analytics-tooltip" role="status" aria-live="polite"><div><strong>{shortAnalyticsDate(detail.date!)}・星期{week.days.find(day=>day.date===detail.date)?.weekday}</strong><span>{detail.item.type==="star"?"加星":"扣星"}・{detail.item.label}</span></div><div><b className={detail.item.type==="star"?"analytics-positive":"analytics-negative"}>{signedStars(detail.item.amount,detail.item.type)}</b><small>共 {detail.item.count} 筆紀錄</small></div><button type="button" aria-label="關閉圖表提示" onClick={()=>setDetail(null)}>×</button></div>}
+        {!week.recordCount&&<p className="analytics-inline-empty">{week.period.label}沒有加星或扣星紀錄，七天仍固定顯示為 0。</p>}
+    </article>;
+}
+
+function DonutBreakdownCard({week,type}:{week:WeeklyStarAnalytics;type:"star"|"deduct"}){
+    const items=type==="star"?week.starItems:week.deductItems,total=type==="star"?week.starTotal:week.deductTotal,label=type==="star"?"加星":"扣星";
+    const [detail,setDetail]=useState<{item:StarCategory;pinned:boolean}|null>(null);
+    const gradient=useMemo(()=>{
+        const result=items.reduce<{offset:number;stops:string[]}>((state,item)=>{
+            const end=state.offset+item.amount/Math.max(1,total)*100;
+            return {offset:end,stops:[...state.stops,`${item.color} ${state.offset}% ${end}%`]};
+        },{offset:0,stops:[]});
+        return `conic-gradient(${result.stops.join(",")})`;
+    },[items,total]);
+    function itemFromPointer(event:ReactPointerEvent<HTMLDivElement>){
+        const rect=event.currentTarget.getBoundingClientRect(),x=event.clientX-(rect.left+rect.width/2),y=event.clientY-(rect.top+rect.height/2),radius=Math.hypot(x,y);
+        if(radius<rect.width*.25||radius>rect.width*.52)return null;
+        const angle=(Math.atan2(y,x)*180/Math.PI+90+360)%360;
+        let end=0;
+        return items.find(item=>{end+=item.amount/Math.max(1,total)*360;return angle<=end})??items.at(-1)??null;
+    }
+    function pointerMove(event:ReactPointerEvent<HTMLDivElement>){if(detail?.pinned)return;const item=itemFromPointer(event);setDetail(item?{item,pinned:false}:null)}
+    function pointerClick(event:ReactPointerEvent<HTMLDivElement>){const item=itemFromPointer(event);if(item)setDetail({item,pinned:true})}
+    const medals=["🥇","🥈","🥉"];
+    return <article className={`donut-breakdown-card ${type}`}>
+        <div className="donut-card-head"><div><h4>{label}來源</h4><p>{week.period.label}共 {total} 顆</p></div><b className={type==="star"?"analytics-positive":"analytics-negative"}>{type==="star"?"+":"−"}{total} ⭐</b></div>
+        {!items.length?<p className="analytics-inline-empty">{week.period.label}沒有{label}紀錄</p>:<>
+            <div className="donut-content"><div className="donut-chart-wrap"><div className="donut-chart" role="img" aria-label={`${week.period.label}${label}來源圓環圖，合計 ${total} 顆`} style={{background:gradient}} onPointerMove={pointerMove} onPointerLeave={()=>setDetail(current=>current?.pinned?current:null)} onPointerDown={pointerClick}><div><small>{week.period.label}{label}</small><strong>{total} ⭐</strong></div></div></div>
+            <ol className="top-three-list" aria-label={`${week.period.label}${label} Top 3`}>{items.slice(0,3).map((item,index)=><li key={item.key}><button type="button" onMouseEnter={()=>setDetail({item,pinned:false})} onMouseLeave={()=>setDetail(current=>current?.pinned?current:null)} onFocus={()=>setDetail({item,pinned:false})} onBlur={()=>setDetail(current=>current?.pinned?current:null)} onClick={()=>setDetail({item,pinned:true})}><span>{medals[index]} <i style={{background:item.color}}/>{item.label}</span><b>{type==="star"?"":"−"}{item.amount} ⭐</b><small>{item.count} 次</small></button></li>)}</ol></div>
+            {detail&&<div className="donut-tooltip" role="status" aria-live="polite"><span><i style={{background:detail.item.color}}/>{detail.item.label}</span><b className={type==="star"?"analytics-positive":"analytics-negative"}>{signedStars(detail.item.amount,type)}</b><small>佔{week.period.label}{label} {Math.round(detail.item.amount/total*100)}%・共 {detail.item.count} 筆</small><button type="button" aria-label="關閉來源提示" onClick={()=>setDetail(null)}>×</button></div>}
+        </>}
+    </article>;
+}
+
+function WeeklyBreakdownSection({week}:{week:WeeklyStarAnalytics}){
+    return <section className="weekly-breakdown-group"><div className="weekly-breakdown-heading"><h3>{week.period.label}</h3><span>{formatWeekRange(week.period)}</span></div><div className="donut-card-grid"><DonutBreakdownCard week={week} type="star"/><DonutBreakdownCard week={week} type="deduct"/></div></section>;
+}
+
+const redemptionSortLabels:Record<RedemptionSortKey,string>={name:"品名",quantity:"兌換數量",totalCost:"消耗星星",latestAt:"最近兌換時間"};
+const defaultRedemptionDirection=(key:RedemptionSortKey):SortDirection=>key==="name"?"asc":"desc";
+
+function WeeklyRedemptionTable({label,range,items}:{label:string;range:string;items:ReturnType<typeof getWeeklyRedemptionSummary>}){
+    const [sort,setSort]=useState<{key:RedemptionSortKey;direction:SortDirection}>({key:"totalCost",direction:"desc"});
+    const sorted=useMemo(()=>sortRedemptionSummary(items,sort.key,sort.direction),[items,sort]);
+    function changeSort(key:RedemptionSortKey){setSort(current=>current.key===key?{key,direction:current.direction==="asc"?"desc":"asc"}:{key,direction:defaultRedemptionDirection(key)})}
+    const arrow=(key:RedemptionSortKey)=>sort.key===key?(sort.direction==="asc"?" ↑":" ↓"):"";
+    const ariaSort=(key:RedemptionSortKey)=>sort.key===key?(sort.direction==="asc"?"ascending":"descending"):"none";
+    return <article className="redemption-week-card">
+        <div className="redemption-week-head"><div><h3>{label}兌換</h3><p>{range}</p></div><strong>{items.reduce((sum,item)=>sum+item.totalCost,0)} ⭐</strong></div>
+        {!items.length?<p className="analytics-inline-empty">{label}沒有已完成的兌換紀錄</p>:<>
+            <div className="mobile-redemption-sort"><label>排序<select value={sort.key} onChange={event=>{const key=event.target.value as RedemptionSortKey;setSort({key,direction:defaultRedemptionDirection(key)})}}>{Object.entries(redemptionSortLabels).map(([key,text])=><option key={key} value={key}>{text}</option>)}</select></label><button type="button" onClick={()=>setSort(current=>({...current,direction:current.direction==="asc"?"desc":"asc"}))}>{sort.direction==="asc"?"升冪 ↑":"降冪 ↓"}</button></div>
+            <div className="redemption-table-wrap"><table className="redemption-table"><thead><tr>{(Object.keys(redemptionSortLabels) as RedemptionSortKey[]).map(key=><th key={key} aria-sort={ariaSort(key)}><button type="button" onClick={()=>changeSort(key)}>{redemptionSortLabels[key]}{arrow(key)}</button></th>)}</tr></thead><tbody>{sorted.map(item=><tr key={item.key}><td>{item.name}</td><td>{item.quantity}</td><td><strong>{item.totalCost} ⭐</strong></td><td>{formatRedemptionTime(item.latestAt)}</td></tr>)}</tbody></table></div>
+            <div className="mobile-redemption-cards">{sorted.map(item=><article key={item.key}><div><strong>{item.name}</strong><small>最近兌換：{formatRedemptionTime(item.latestAt)}</small></div><dl><div><dt>數量</dt><dd>{item.quantity}</dd></div><div><dt>消耗星星</dt><dd>{item.totalCost} ⭐</dd></div></dl></article>)}</div>
+        </>}
+    </article>;
+}
+
+function Analytics({entries,redemptions,child,onRefresh,todayKey}:{entries:Entry[];redemptions:Redeem[];child:Child;onRefresh:()=>Promise<boolean>;todayKey:string}){
+    const periods=useMemo(()=>getWeekPeriods(todayKey),[todayKey]);
+    const previous=useMemo(()=>getWeeklyStarAnalytics(entries,child.id,getWeekPeriods(todayKey).previous,todayKey),[entries,child.id,todayKey]);
+    const current=useMemo(()=>getWeeklyStarAnalytics(entries,child.id,getWeekPeriods(todayKey).current,todayKey),[entries,child.id,todayKey]);
+    const previousRedemptions=useMemo(()=>getWeeklyRedemptionSummary(redemptions,child.id,getWeekPeriods(todayKey).previous),[redemptions,child.id,todayKey]);
+    const currentRedemptions=useMemo(()=>getWeeklyRedemptionSummary(redemptions,child.id,getWeekPeriods(todayKey).current),[redemptions,child.id,todayKey]);
+    const [refreshing,setRefreshing]=useState(false),[lastUpdated,setLastUpdated]=useState("");
+    const previousCost=previousRedemptions.reduce((sum,item)=>sum+item.totalCost,0),currentCost=currentRedemptions.reduce((sum,item)=>sum+item.totalCost,0);
+    const rangeStart=periods.previous.start,rangeEnd=periods.current.end;
+    const rows=useMemo(()=>entries.filter(entry=>entry.childId===child.id&&(entry.status??"completed")==="completed"&&(entry.type==="star"||entry.type==="deduct")).filter(entry=>{const date=entryAnalyticsDateKey(entry);return date>=rangeStart&&date<=rangeEnd}),[entries,child.id,rangeStart,rangeEnd]);
+    const hasAnyData=previous.recordCount+current.recordCount+previousRedemptions.length+currentRedemptions.length>0;
+    async function refresh(){setRefreshing(true);try{if(await onRefresh())setLastUpdated(new Date().toLocaleTimeString("zh-TW",{timeZone:"Asia/Taipei",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}))}finally{setRefreshing(false)}}
+    function exportExcel(){
+        const days=[...previous.days,...current.days],added=previous.starTotal+current.starTotal,deducted=previous.deductTotal+current.deductTotal,workbook=buildAnalyticsWorkbook({child:child.name,from:periods.previous.start,to:periods.current.end,filter:"上週＋本週（加星與扣星）",rows:rows.map(item=>({date:item.date,type:item.type as "star"|"deduct",title:item.title,amount:item.amount})),daily:days.map(day=>({day:day.date,add:day.starTotal,deduct:day.deductTotal})),added,deducted});
+        const url=URL.createObjectURL(new Blob([workbook],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})),link=document.createElement("a");link.href=url;link.download=`星星分析_${child.name.replace(/[\\/:*?"<>|]/g,"_")}_${periods.previous.start}_${periods.current.end}.xlsx`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }
+    return <div className="analytics weekly-analytics">
+        <section className="analytics-panel analytics-overview"><div className="analytics-title"><div><h2>📊 {child.name} 的每週分析</h2><p>每週以星期日至星期六計算，日期與跨日均採 Asia/Taipei。兌換消耗與行為扣星分開統計。</p><small>上週 {formatWeekRange(periods.previous)}・本週 {formatWeekRange(periods.current)}</small></div><div className="analytics-title-actions"><button type="button" className="refresh-button" disabled={refreshing} onClick={refresh}>{refreshing?"刷新中…":"↻ 刷新資料"}</button><button type="button" className="primary" disabled={!rows.length} onClick={exportExcel}>匯出 Excel</button>{lastUpdated&&<small>最後更新 {lastUpdated}</small>}</div></div></section>
+        {!hasAnyData&&<section className="analytics-no-data"><span>📊</span><h2>尚無足夠資料</h2><p>新增星星紀錄、完成每日任務或兌換獎品後，這裡會顯示每週分析。</p></section>}
+        <section aria-labelledby="weekly-summary-title"><div className="analytics-section-title"><div><h2 id="weekly-summary-title">本週／上週摘要</h2><p>兌換是消費紀錄，不會算成扣星。</p></div></div><div className="weekly-summary-grid"><WeeklySummaryCard week={previous} redemptionCost={previousCost}/><WeeklySummaryCard week={current} redemptionCost={currentCost}/></div></section>
+        <section className="analytics-panel" aria-labelledby="weekly-chart-title"><div className="analytics-section-title"><div><h2 id="weekly-chart-title">📊 每週星星變化</h2><p>加星在 0 軸上方，扣星在下方；同項目跨日期維持相同顏色。</p></div></div><div className="weekly-chart-grid"><WeeklyDivergingBarChart week={previous}/><WeeklyDivergingBarChart week={current}/></div></section>
+        <section className="analytics-panel" aria-labelledby="source-title"><div className="analytics-section-title"><div><h2 id="source-title">🥧 星星來源分析</h2><p>點擊或觸碰圓環／Top 3 項目，可查看比例與紀錄筆數。</p></div></div><div className="weekly-breakdown-list"><WeeklyBreakdownSection week={previous}/><WeeklyBreakdownSection week={current}/></div></section>
+        <section className="analytics-panel" aria-labelledby="redemption-title"><div className="analytics-section-title"><div><h2 id="redemption-title">🎁 兌換統計</h2><p>依兌換當時的名稱與實際消耗快照合併，不受目前獎品價格或刪除影響。</p></div></div><div className="redemption-week-grid"><WeeklyRedemptionTable label="上週" range={formatWeekRange(periods.previous)} items={previousRedemptions}/><WeeklyRedemptionTable label="本週" range={formatWeekRange(periods.current)} items={currentRedemptions}/></div></section>
+    </div>;
 }
 export default function App() {
     const [data, setData] = useState(fallback), [cid, setCid] = useState("c1"), [tab, setTab] = useState("首頁"), [role, setRole] = useState("孩子"), [password, setPassword] = useState(""), [newPasswordDraft,setNewPasswordDraft]=useState(""), [passwordSet, setPasswordSet] = useState(false), [login, setLogin] = useState(false), [record, setRecord] = useState(false), [redeem, setRedeem] = useState<Reward | null>(null), [quickConfirm, setQuickConfirm] = useState<Template | null>(null), [toast, setToast] = useState(""), [loading, setLoading] = useState(true);
@@ -325,13 +465,13 @@ export default function App() {
     ;
     if (loading)
         return <main className="loading">正在載入家庭資料…</main>;
-    return <main className={showSettingsSaveBar?"has-settings-save-bar":undefined}><header className="topbar"><button type="button" className="brand" aria-label="返回首頁｜星星日記" onClick={event => goTab("首頁",event.currentTarget)}><img className="brand-logo" src="/star-diary-logo.jpg" alt="" width={48} height={48}/><span className="brand-label">星星日記</span></button><nav aria-label="主要導覽">{["首頁", "任務挑戰", "星星紀錄", ...(role === "家長" ? ["資料分析"] : []), "星星寶庫", "兌換紀錄", ...(role === "家長" ? ["家庭設定"] : [])].map(x => <button key={x} className={tab === x ? "active" : ""} aria-current={tab===x?"page":undefined} onClick={event => goTab(x,event.currentTarget)}>{x}</button>)}</nav><div className="role-switch"><button className={role === "家長" ? "on" : ""} onClick={enterParent}>家長</button><button className={role === "孩子" ? "on" : ""} onClick={event=>switchToChildMode(event.currentTarget)}>孩子</button></div></header><section className="shell"><div className="hello"><div><p className="eyebrow">FAMILY STAR JOURNAL</p><h1>{tab === "首頁" ? `嗨，${child.name}！今天也很棒 👋` : tab}</h1><p>每位孩子都有自己的星星與完整紀錄。</p></div><label className="child-pill"><Avatar c={child}/><select value={cid} onChange={event => requestChildChange(event.target.value,event.currentTarget)}>{data.children.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label></div>
+    return <main className={showSettingsSaveBar?"has-settings-save-bar":undefined}><header className="topbar"><button type="button" className="brand" aria-label="返回首頁｜星星日記" onClick={event => goTab("首頁",event.currentTarget)}><img className="brand-logo" src="/star-diary-logo.jpg" alt="" width={48} height={48}/><span className="brand-label">星星日記</span></button><nav aria-label="主要導覽">{["首頁", "任務挑戰", "星星紀錄", "資料分析", "星星寶庫", "兌換紀錄", ...(role === "家長" ? ["家庭設定"] : [])].map(x => <button key={x} className={tab === x ? "active" : ""} aria-current={tab===x?"page":undefined} onClick={event => goTab(x,event.currentTarget)}>{x}</button>)}</nav><div className="role-switch"><button className={role === "家長" ? "on" : ""} onClick={enterParent}>家長</button><button className={role === "孩子" ? "on" : ""} onClick={event=>switchToChildMode(event.currentTarget)}>孩子</button></div></header><section className="shell"><div className="hello"><div><p className="eyebrow">FAMILY STAR JOURNAL</p><h1>{tab === "首頁" ? `嗨，${child.name}！今天也很棒 👋` : tab}</h1><p>每位孩子都有自己的星星與完整紀錄。</p></div><label className="child-pill"><Avatar c={child}/><select value={cid} onChange={event => requestChildChange(event.target.value,event.currentTarget)}>{data.children.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label></div>
     {tab === "首頁" && <><section className="hero-grid"><article className="balance-card"><p>我的星星</p><div className="big-star"><span>★</span><strong>{child.stars}</strong></div><small>每一次努力，都值得被看見</small></article><article className="week-card"><p>快速選取指標</p><div className="template-picks">{data.templates.map(t => <button key={t.id} className={t.type==="deduct"?"deduct-pick":""} onClick={() => setQuickConfirm(t)}>{t.type === "star" ? "＋" : t.type==="deduct"?"−":"🎉"}{Math.max(1,Math.abs(Math.floor(Number(t.amount)||1)))}　{t.title}</button>)}</div></article><article className="quick-card"><p>新增紀錄</p><strong>今天發生什麼事？</strong><div><button onClick={() => setRecord(true)}><span>＋★</span>加星／扣星／特殊</button></div></article></section><Title text="最近紀錄"/><Entries /></>}
     {tab === "任務挑戰" && TaskChallenge()}
     {tab === "星星紀錄" && <><div className="record-tools"><span>日期與時間皆會自動記錄</span>{role === "家長" && <button className="primary" onClick={() => setRecord(true)}>＋ 新增紀錄</button>}</div><Entries /></>}
     {tab === "星星寶庫" && <><div className="reward-top"><div><span>★</span><p>{child.name}目前有 <b>{child.stars}</b> 顆星星</p></div></div><Title text="星星獎品"/><div className="reward-grid">{data.rewards.map(r => {const cost=positiveInt(r.cost);return <article className="reward-card" key={r.id}><div className="reward-icon">{r.image?<img src={r.image} alt={r.name}/>:r.icon}</div><h3>{r.name}</h3><p><span>★</span> {cost} 顆</p><button onClick={() => { if (child.stars < cost)return say(`星星不足，還差 ${cost - child.stars} 顆`); setRedeem({...r,cost,source:"star"}); }}>使用星星兌換</button></article>})}</div><Title text="特殊獎勵倉庫"/><p className="warehouse-note">獲得特殊獎勵會自動進貨；家長確認兌換後出貨，庫存為 0 時自動下架。</p><div className="reward-grid">{data.specialRewards.filter(r=>r.stock>0).map(r=><article className="reward-card special-card" key={r.id}><div className="reward-icon">{r.image?<img src={r.image} alt={r.name}/>:r.icon}</div><h3>{r.name}</h3><p>庫存 <b>{r.stock}</b> 個</p><button onClick={()=>setRedeem({...r,source:"special"})}>直接兌換</button></article>)}</div>{!data.specialRewards.some(r=>r.stock>0)&&<p className="empty">目前沒有特殊獎勵庫存</p>}</>}
     {tab === "兌換紀錄" && <><Title text="兌換歷史"/><div className="entries">{data.redemptions.filter(x => x.childId === cid).map(x => <article key={x.id}><div className="entry-icon">🎁</div><div className="entry-copy"><h3>{x.reward}</h3><small>{x.date} · {x.status==="pending"?"等待家長確認":"已完成"}</small></div><strong>{x.status==="pending"?"待確認":x.cost ? `−${x.cost} ★` : "直接兌換"}</strong>{role==="家長"&&x.status==="pending"&&<button className="primary" onClick={()=>confirmRedemption(x)}>確認已執行</button>}</article>)}{!data.redemptions.some(x => x.childId === cid) && <p className="empty">目前還沒有兌換紀錄</p>}</div></>}
-    {tab === "資料分析" && role === "家長" && <Analytics entries={data.entries} child={child} onRefresh={refreshAnalytics}/>}
+    {tab === "資料分析" && <Analytics entries={data.entries} redemptions={data.redemptions} child={child} onRefresh={refreshAnalytics} todayKey={todayKey}/>}
     {tab === "家庭設定" && role === "家長" && Settings()}</section>{showSettingsSaveBar&&<aside className={`settings-save-bar${keyboardOpen?" is-keyboard-open":""}`} role="region" aria-label="設定儲存操作" aria-busy={savingSettings||imageUploading}><div className="settings-save-bar-inner"><div className="settings-save-status" role="status" aria-live="polite"><span aria-hidden="true">⚙️</span><strong>{imageUploading?"圖片上傳中…":savingSettings?"正在儲存設定…":"你有尚未儲存的設定"}</strong></div><div className="settings-save-actions"><button type="button" className="settings-save-cancel" disabled={savingSettings||imageUploading} onClick={()=>restoreSettingsSnapshot()}>取消</button><button type="button" className="settings-save-submit" disabled={savingSettings||imageUploading} onClick={()=>void saveAllSettings()}>{imageUploading?"圖片上傳中…":savingSettings?"儲存中…":"儲存"}</button></div></div></aside>}{record&&<RecordModal templates={data.templates} onClose={()=>setRecord(false)} onSave={addEntry} onValidationError={say}/>} {redeem && <RedeemModal />}{quickConfirm && <QuickConfirmModal />}{taskConfirm&&<div className="modal-back"><section className="modal quick-confirm-modal"><button className="close" onClick={()=>setTaskConfirm(null)}>×</button><h2>確認完成任務</h2><div className="confirm-box"><p>任務<strong>{taskConfirm.iconSnapshot} {taskConfirm.titleSnapshot}</strong></p><p>完成獎勵<strong>＋{taskConfirm.rewardStarsSnapshot} ⭐</strong></p><p>記錄對象<strong>{child.name}</strong></p><p>生效方式<strong>{taskSettingsForChild(data.dailyTaskSettings,cid).completionMode==="approval"?"送出後等待家長確認":"完成後立即加星"}</strong></p></div><div className="record-actions"><button className="save" disabled={Boolean(taskBusy)} onClick={()=>{const target=taskConfirm;setTaskConfirm(null);void runTaskAction(target,"complete")}}>確認完成</button><button type="button" className="cancel-action" onClick={()=>setTaskConfirm(null)}>取消</button></div></section></div>}{crop&&<CropModal target={crop} onCancel={cancelCrop} onError={cropError} onConfirm={saveCrop}/>} {login && <div className="modal-back"><section className="modal"><button className="close" onClick={() => setLogin(false)}>×</button><h2>輸入家長密碼</h2><input className="full-input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus/><button className="save" onClick={verify}>進入家長模式</button></section></div>}{pendingSettingsIntent&&<UnsavedSettingsModal returnFocus={intentTriggerRef.current} onContinue={continueEditing} onDiscard={discardAndContinue}/>} {toast && <div className="toast" role="status" aria-live="polite">{toast}</div>}</main>;
     async function runTaskAction(taskRecord:DailyTaskRecord,operation:"complete"|"approve"|"reject"|"skip"|"restore"|"undo"){
         if(taskBusy)return;setTaskBusy(taskRecord.id);
