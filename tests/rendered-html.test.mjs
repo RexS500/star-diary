@@ -32,3 +32,23 @@ test("daily tasks are connected to settings, challenge navigation and server act
   assert.match(css, /\.daily-task-settings-card/);
   assert.match(css, /\.task-card-grid/);
 });
+
+test("family settings use a reversible draft and a safe-area sticky save bar", async () => {
+  const [home, css, draft] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/settings-draft.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(home, /你有尚未儲存的設定/);
+  assert.match(home, /尚有未儲存的設定/);
+  assert.match(home, /繼續編輯/);
+  assert.match(home, /放棄修改/);
+  assert.match(home, /beforeunload/);
+  assert.match(home, /restoreSettingsSnapshot/);
+  assert.match(home, /saveAllSettings/);
+  assert.doesNotMatch(home, />儲存所有設定</);
+  assert.match(css, /\.settings-save-bar/);
+  assert.match(css, /safe-area-inset-bottom/);
+  assert.match(css, /\.unsaved-settings-modal/);
+  assert.match(draft, /normalizeSettingsForComparison/);
+});
