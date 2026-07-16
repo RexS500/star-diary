@@ -56,3 +56,26 @@ test("family settings use a reversible draft and a safe-area sticky save bar", a
   assert.match(css, /\.unsaved-settings-modal/);
   assert.match(draft, /normalizeSettingsForComparison/);
 });
+
+test("record modal keeps one mounted scroll container while the iPhone keyboard changes", async () => {
+  const [home, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const modalAt = home.indexOf("function RecordModal(");
+  const appAt = home.indexOf("export default function App()");
+  const modalEnd = home.indexOf("function Analytics(", modalAt);
+  const modal = home.slice(modalAt, modalEnd);
+  assert.ok(modalAt >= 0 && modalAt < appAt, "RecordModal must stay at module scope so parent renders do not remount it");
+  assert.equal(home.match(/function RecordModal\(/g)?.length, 1);
+  assert.doesNotMatch(home, /\{record\s*&&\s*<RecordModal[^>]*\bkey\s*=/);
+  assert.match(modal, /visualViewport/);
+  assert.match(modal, /scrollIntoView\(\{block:"nearest",inline:"nearest",behavior:"smooth"\}\)/);
+  assert.doesNotMatch(modal, /scrollTo\s*\(|\.scrollTop\s*=|autoFocus|block:\s*["']start["']/);
+  assert.match(modal, /value=\{name\}[^>]*onChange=\{event=>setName\(event\.target\.value\)\}/);
+  assert.match(modal, /獎勵數量<input[^>]*value=\{n\}[^>]*onChange=\{event=>setN\(/);
+  assert.match(modal, /if\(await onSave\([^)]*\)\)onClose\(\)/);
+  assert.match(css, /\.record-modal-back\{[^}]*overflow:hidden;[^}]*overscroll-behavior:contain/);
+  assert.match(css, /\.record-modal\{[^}]*100dvh[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain;[^}]*-webkit-overflow-scrolling:touch/);
+  assert.match(css, /\.record-modal[^}]*safe-area-inset-bottom/);
+});
