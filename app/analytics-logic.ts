@@ -15,6 +15,7 @@ export type AnalyticsEntryLike = {
     status?: string;
     sourceType?: string;
     sourceId?: string;
+    occurredAt?: string;
     createdAt?: string;
 };
 
@@ -127,6 +128,8 @@ export function analyticsDateKey(value: unknown) {
 }
 
 export function entryAnalyticsTimestamp(entry: AnalyticsEntryLike) {
+    const occurred = analyticsTimestamp(entry.occurredAt);
+    if (Number.isFinite(occurred)) return occurred;
     const created = analyticsTimestamp(entry.createdAt);
     return Number.isFinite(created) ? created : analyticsTimestamp(entry.date);
 }

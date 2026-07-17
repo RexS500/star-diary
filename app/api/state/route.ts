@@ -11,6 +11,16 @@ import {
     type DailyTaskSettingsMap,
     type DailyTaskStatus,
 } from "../../daily-task-logic";
+import {
+    createRecoveryToken,
+    hashSecret,
+    normalizeSecurityAnswer,
+    securityLockStatus,
+    sha256Hex,
+    validatePasswordPair,
+    validateSecuritySetup,
+    verifySecret,
+} from "../../security-logic";
 
 const initial = {
     children: [{ id: "c1", name: "小宇", gender: "boy", avatar: "boy", stars: 0 }],
@@ -24,6 +34,14 @@ const initial = {
     dailyTaskRecords: [],
     dailyTaskSettings: {},
     passwordHash: "",
+    securityQuestionType: "",
+    securityQuestionText: "",
+    securityAnswerHash: "",
+    securityAnswerHint: "",
+    securityFailedAttempts: 0,
+    securityLockedUntil: "",
+    securityResetTokenHash: "",
+    securityResetTokenExpiresAt: "",
 };
 
 // The persisted legacy JSON intentionally accepts fields introduced by older site versions.
@@ -36,6 +54,14 @@ type StoredState = JsonRecord & {
     dailyTaskRecords: DailyTaskRecord[];
     dailyTaskSettings: DailyTaskSettingsMap;
     passwordHash: string;
+    securityQuestionType: string;
+    securityQuestionText: string;
+    securityAnswerHash: string;
+    securityAnswerHint: string;
+    securityFailedAttempts: number;
+    securityLockedUntil: string;
+    securityResetTokenHash: string;
+    securityResetTokenExpiresAt: string;
 };
 type StateRow = { data: string; updated_at: number };
 
@@ -156,6 +182,14 @@ function normalizeState(value: unknown): StoredState {
     }
     state.dailyTaskRecords = [...recordsByKey.values()];
     state.passwordHash = typeof state.passwordHash === "string" ? state.passwordHash : "";
+    state.securityQuestionType = typeof state.securityQuestionType === "string" ? state.securityQuestionType : "";
+    state.securityQuestionText = typeof state.securityQuestionText === "string" ? state.securityQuestionText : "";
+    state.securityAnswerHash = typeof state.securityAnswerHash === "string" ? state.securityAnswerHash : "";
+    state.securityAnswerHint = typeof state.securityAnswerHint === "string" ? state.securityAnswerHint : "";
+    state.securityFailedAttempts = Number.isFinite(Number(state.securityFailedAttempts)) ? Math.max(0, Math.floor(Number(state.securityFailedAttempts))) : 0;
+    state.securityLockedUntil = validIso(state.securityLockedUntil) ? state.securityLockedUntil : "";
+    state.securityResetTokenHash = typeof state.securityResetTokenHash === "string" ? state.securityResetTokenHash : "";
+    state.securityResetTokenExpiresAt = validIso(state.securityResetTokenExpiresAt) ? state.securityResetTokenExpiresAt : "";
     return state as StoredState;
 }
 
@@ -237,18 +271,37 @@ async function mutateState(mutator: (state: StoredState) => Promise<boolean | vo
     throw new ApiError("資料正在被其他裝置更新，請稍後再試", 409);
 }
 
-async function hash(value: string) {
-    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-    return Array.from(new Uint8Array(bytes)).map(item => item.toString(16).padStart(2, "0")).join("");
+async function requireParent(state: StoredState, password = "") {
+    if (state.passwordHash && !await verifySecret(password, state.passwordHash)) throw new ApiError("密碼錯誤", 403);
 }
 
-async function requireParent(state: StoredState, password = "") {
-    if (state.passwordHash && await hash(password) !== state.passwordHash) throw new ApiError("密碼錯誤", 403);
+async function requireOriginalParentPassword(state: StoredState, password = "") {
+    if (!state.passwordHash || !await verifySecret(password, state.passwordHash)) throw new ApiError("原始密碼不正確", 403);
 }
 
 function safePayload(state: StoredState, revision: number, extra: JsonRecord = {}) {
-    const { passwordHash, ...safe } = state;
-    return { ok: true, state: safe, passwordSet: Boolean(passwordHash), revision, ...extra };
+    const safe: JsonRecord = { ...state };
+    delete safe.passwordHash;
+    delete safe.securityAnswerHash;
+    delete safe.securityFailedAttempts;
+    delete safe.securityLockedUntil;
+    delete safe.securityResetTokenHash;
+    delete safe.securityResetTokenExpiresAt;
+    const lock = securityLockStatus(state.securityFailedAttempts, state.securityLockedUntil);
+    return {
+        ok: true,
+        state: safe,
+        passwordSet: Boolean(state.passwordHash),
+        security: {
+            configured: Boolean(state.securityAnswerHash && state.securityQuestionText),
+            questionType: state.securityQuestionType,
+            questionText: state.securityQuestionText,
+            hint: state.securityAnswerHint,
+            ...(lock.lockedUntil ? { lockedUntil: lock.lockedUntil } : {}),
+        },
+        revision,
+        ...extra,
+    };
 }
 
 const dailyRecordKey = (record: Pick<DailyTaskRecord, "definitionId" | "childId" | "date">) => `${record.definitionId}|${record.childId}|${record.date}`;
@@ -280,7 +333,7 @@ function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "
         delete record.skippedAt;
         return true;
     }
-    const entry = { id: crypto.randomUUID(), childId: record.childId, title: `每日任務：${record.titleSnapshot}`, amount: positiveInt(record.rewardStarsSnapshot), type: "star", date: new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), createdAt: nowIso, status: "completed", sourceType: "daily_task", sourceId: record.id };
+    const entry = { id: crypto.randomUUID(), childId: record.childId, title: `每日任務：${record.titleSnapshot}`, amount: positiveInt(record.rewardStarsSnapshot), type: "star", date: new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), occurredAt: nowIso, createdAt: nowIso, status: "completed", sourceType: "daily_task", sourceId: record.id };
     const child = state.children.find(item => item.id === record.childId);
     if (!child) throw new ApiError("找不到孩子資料", 404);
     child.stars = Math.max(0, Number(child.stars) || 0) + entry.amount;
@@ -307,14 +360,127 @@ export async function GET() {
 
 export async function POST(req: Request) {
     try {
-        const body = await req.json() as { action: string; password?: string; newPassword?: string; state?: Record<string, unknown>; record?: Record<string, unknown>; recordId?: string; childId?: string; operation?: string; expectedRevision?: number };
+        const body = await req.json() as {
+            action: string;
+            password?: string;
+            currentPassword?: string;
+            newPassword?: string;
+            confirmPassword?: string;
+            securityQuestionType?: string;
+            securityQuestionText?: string;
+            securityAnswer?: string;
+            confirmSecurityAnswer?: string;
+            securityAnswerHint?: string;
+            recoveryToken?: string;
+            state?: Record<string, unknown>;
+            record?: Record<string, unknown>;
+            recordId?: string;
+            childId?: string;
+            operation?: string;
+            expectedRevision?: number;
+        };
+
+        if (body.action === "set_parent_password") {
+            const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "");
+            if (passwordError) throw new ApiError(passwordError, 400);
+            const securityError = validateSecuritySetup(body.securityQuestionType || "", body.securityQuestionText || "", body.securityAnswer || "", body.confirmSecurityAnswer || "");
+            if (securityError) throw new ApiError(securityError, 400);
+            if (!body.securityQuestionText?.trim()) throw new ApiError("請選擇安全提示問題", 400);
+            const result = await mutateState(async state => {
+                if (state.passwordHash) throw new ApiError("家長密碼已設定，請使用修改密碼功能", 409);
+                state.passwordHash = await hashSecret(body.newPassword || "");
+                state.securityQuestionType = body.securityQuestionType || "";
+                state.securityQuestionText = body.securityQuestionText.trim();
+                state.securityAnswerHash = await hashSecret(normalizeSecurityAnswer(body.securityAnswer || ""));
+                state.securityAnswerHint = body.securityAnswerHint?.trim() || "";
+                state.securityFailedAttempts = 0;
+                state.securityLockedUntil = "";
+                state.securityResetTokenHash = "";
+                state.securityResetTokenExpiresAt = "";
+            });
+            return Response.json(safePayload(result.state, result.revision));
+        }
+
+        if (body.action === "change_parent_password") {
+            const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "", body.currentPassword || "");
+            if (passwordError) throw new ApiError(passwordError, 400);
+            const result = await mutateState(async state => {
+                if (!state.passwordHash) throw new ApiError("尚未設定家長密碼", 409);
+                await requireOriginalParentPassword(state, body.currentPassword || "");
+                state.passwordHash = await hashSecret(body.newPassword || "");
+                state.securityResetTokenHash = "";
+                state.securityResetTokenExpiresAt = "";
+            });
+            return Response.json(safePayload(result.state, result.revision));
+        }
+
+        if (body.action === "update_security_question") {
+            const securityError = validateSecuritySetup(body.securityQuestionType || "", body.securityQuestionText || "", body.securityAnswer || "", body.confirmSecurityAnswer || "");
+            if (securityError) throw new ApiError(securityError, 400);
+            if (!body.securityQuestionText?.trim()) throw new ApiError("請選擇安全提示問題", 400);
+            const result = await mutateState(async state => {
+                if (!state.passwordHash) throw new ApiError("請先設定家長密碼", 409);
+                await requireOriginalParentPassword(state, body.currentPassword || "");
+                state.securityQuestionType = body.securityQuestionType || "";
+                state.securityQuestionText = body.securityQuestionText.trim();
+                state.securityAnswerHash = await hashSecret(normalizeSecurityAnswer(body.securityAnswer || ""));
+                state.securityAnswerHint = body.securityAnswerHint?.trim() || "";
+                state.securityFailedAttempts = 0;
+                state.securityLockedUntil = "";
+                state.securityResetTokenHash = "";
+                state.securityResetTokenExpiresAt = "";
+            });
+            return Response.json(safePayload(result.state, result.revision));
+        }
+
+        if (body.action === "verify_security_answer") {
+            let recoveryToken = "", answerCorrect = false, lockedAfterFailure = false;
+            const result = await mutateState(async state => {
+                if (!state.passwordHash || !state.securityAnswerHash || !state.securityQuestionText) throw new ApiError("目前尚未設定安全提示問題，無法使用此方式重設密碼。", 409);
+                const lock = securityLockStatus(state.securityFailedAttempts, state.securityLockedUntil);
+                if (lock.locked) throw new ApiError("嘗試次數過多，請稍後再試", 429);
+                answerCorrect = await verifySecret(normalizeSecurityAnswer(body.securityAnswer || ""), state.securityAnswerHash);
+                if (!answerCorrect) {
+                    state.securityFailedAttempts += 1;
+                    if (state.securityFailedAttempts >= 5) {
+                        state.securityLockedUntil = new Date(Date.now() + 5 * 60_000).toISOString();
+                        lockedAfterFailure = true;
+                    }
+                    return true;
+                }
+                recoveryToken = createRecoveryToken();
+                state.securityResetTokenHash = await sha256Hex(recoveryToken);
+                state.securityResetTokenExpiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+                state.securityFailedAttempts = 0;
+                state.securityLockedUntil = "";
+                return true;
+            });
+            if (!answerCorrect) throw new ApiError(lockedAfterFailure ? "嘗試次數過多，請稍後再試" : "答案不正確，請再試一次", lockedAfterFailure ? 429 : 403);
+            return Response.json(safePayload(result.state, result.revision, { recoveryToken }));
+        }
+
+        if (body.action === "reset_parent_password") {
+            const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "");
+            if (passwordError) throw new ApiError(passwordError, 400);
+            const result = await mutateState(async state => {
+                if (!state.securityResetTokenHash || !validIso(state.securityResetTokenExpiresAt) || Date.parse(state.securityResetTokenExpiresAt) <= Date.now()) throw new ApiError("重設連結已失效，請重新驗證安全問題", 403);
+                if (!body.recoveryToken || await sha256Hex(body.recoveryToken) !== state.securityResetTokenHash) throw new ApiError("重設驗證失效，請重新驗證安全問題", 403);
+                if (state.passwordHash && await verifySecret(body.newPassword || "", state.passwordHash)) throw new ApiError("新密碼不可與原始密碼相同", 400);
+                state.passwordHash = await hashSecret(body.newPassword || "");
+                state.securityResetTokenHash = "";
+                state.securityResetTokenExpiresAt = "";
+                state.securityFailedAttempts = 0;
+                state.securityLockedUntil = "";
+            });
+            return Response.json(safePayload(result.state, result.revision));
+        }
 
         if (body.action === "child_entry") {
             const submitted = body.record;
-            if (!submitted || submitted.status !== "pending" || submitted.sourceType || submitted.sourceId || submitted.revokedAt) throw new ApiError("不正確的孩子紀錄", 400);
+            if (!submitted || submitted.status !== "pending" || submitted.sourceType || submitted.sourceId || submitted.revokedAt || submitted.occurredAt) throw new ApiError("不正確的孩子紀錄", 400);
             const type = submitted.type === "deduct" || submitted.type === "special" ? submitted.type : submitted.type === "star" ? "star" : null;
             if (!type || typeof submitted.childId !== "string" || typeof submitted.title !== "string" || !submitted.title.trim()) throw new ApiError("紀錄內容不完整", 400);
-            const nowIso = new Date().toISOString(), record = { id: typeof submitted.id === "string" && submitted.id ? submitted.id : crypto.randomUUID(), childId: submitted.childId, title: submitted.title.trim(), amount: positiveInt(submitted.amount), type, date: new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), createdAt: nowIso, status: "pending" };
+            const nowIso = new Date().toISOString(), record = { id: typeof submitted.id === "string" && submitted.id ? submitted.id : crypto.randomUUID(), childId: submitted.childId, title: submitted.title.trim(), amount: positiveInt(submitted.amount), type, date: new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), occurredAt: nowIso, createdAt: nowIso, status: "pending" };
             const result = await mutateState(state => {
                 if (!state.children.some(child => child.id === record.childId)) throw new ApiError("找不到孩子資料", 404);
                 if (state.entries.some(entry => entry.id === record.id)) return false;
@@ -408,8 +574,25 @@ export async function POST(req: Request) {
         if (body.action !== "save" || !body.state) throw new ApiError("不正確的儲存內容", 400);
         if (!Number.isFinite(body.expectedRevision)) throw new ApiError("這個頁面版本過舊，請重新整理後再儲存", 428);
         if (Number(body.expectedRevision) !== current.revision) throw new ApiError("資料已被其他裝置更新，已為您保留最新版本，請重新整理後再儲存", 409);
-        const passwordHash = body.newPassword ? await hash(body.newPassword) : current.state.passwordHash;
-        const next = normalizeState({ ...current.state, ...body.state, passwordHash });
+        if (Array.isArray(body.state.entries)) {
+            for (const raw of body.state.entries) {
+                const entry = asRecord(raw);
+                if (entry.occurredAt !== undefined && (!validIso(entry.occurredAt) || Date.parse(entry.occurredAt) > Date.now())) throw new ApiError("紀錄時間不可晚於現在", 400);
+            }
+        }
+        const next = normalizeState({
+            ...current.state,
+            ...body.state,
+            passwordHash: current.state.passwordHash,
+            securityQuestionType: current.state.securityQuestionType,
+            securityQuestionText: current.state.securityQuestionText,
+            securityAnswerHash: current.state.securityAnswerHash,
+            securityAnswerHint: current.state.securityAnswerHint,
+            securityFailedAttempts: current.state.securityFailedAttempts,
+            securityLockedUntil: current.state.securityLockedUntil,
+            securityResetTokenHash: current.state.securityResetTokenHash,
+            securityResetTokenExpiresAt: current.state.securityResetTokenExpiresAt,
+        });
         next.dailyTasks = prepareTaskDefinitionsForSave(current.state.dailyTasks, next.dailyTasks);
         reconcileTodayPendingRecords(next);
         const saved = await writeState(next, current.revision);
