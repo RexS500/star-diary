@@ -15,6 +15,8 @@ const localBindingConfig = {
     ? [
         {
           binding: d1,
+          database_name: "star-diary-db",
+          database_id: "23603ab4-8a8a-4c74-b463-48f08bb13739",
         },
       ]
     : [],
