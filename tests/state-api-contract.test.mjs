@@ -15,6 +15,16 @@ test("state API uses dedicated secure parent password and recovery actions", () 
   assert.doesNotMatch(source, /parentPasswordPlainText|securityAnswerPlainText/);
 });
 
+test("initial parent password setup is separate from recovery question setup", () => {
+  const start = source.indexOf('if (body.action === "set_parent_password")');
+  const end = source.indexOf('if (body.action === "change_parent_password")', start);
+  const block = source.slice(start, end);
+  assert.match(block, /state\.passwordHash = await hashSecret\(body\.newPassword/);
+  assert.doesNotMatch(block, /validateSecuritySetup|normalizeSecurityAnswer/);
+  assert.match(block, /state\.securityQuestionType = ""/);
+  assert.match(block, /state\.securityAnswerHash = ""/);
+});
+
 test("safe payload removes hashes and reset tokens", () => {
   for (const field of ["passwordHash", "securityAnswerHash", "securityResetTokenHash", "securityResetTokenExpiresAt"]) {
     assert.match(source, new RegExp(`delete safe\\.${field}`));

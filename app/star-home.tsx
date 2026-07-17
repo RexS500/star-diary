@@ -338,15 +338,14 @@ function ParentSecuritySettings({passwordSet,security,onPayload,onMessage}:{pass
         return result;
     }
     async function setInitialPassword(){
-        setPasswordError("");setSecurityError("");
-        const passwordValidation=validatePasswordPair(newPassword,confirmPassword),securityValidation=validateSecuritySetup(questionType,questionText,answer,confirmAnswer);
+        setPasswordError("");
+        const passwordValidation=validatePasswordPair(newPassword,confirmPassword);
         if(passwordValidation){setPasswordError(passwordValidation);return}
-        if(securityValidation){setSecurityError(securityValidation);return}
         setBusy(true);
         try{
-            const result=await post({action:"set_parent_password",newPassword,confirmPassword,securityQuestionType:questionType,securityQuestionText:questionText,securityAnswer:answer,confirmSecurityAnswer:confirmAnswer,securityAnswerHint:hint});
-            onPayload(result,newPassword);setNewPassword("");setConfirmPassword("");setAnswer("");setConfirmAnswer("");setEditingSecurity(false);onMessage("家長密碼已設定");
-        }catch(error){setSecurityError(error instanceof Error?error.message:"設定失敗")}finally{setBusy(false)}
+            const result=await post({action:"set_parent_password",newPassword,confirmPassword});
+            onPayload(result,newPassword);setNewPassword("");setConfirmPassword("");onMessage("家長密碼已設定");
+        }catch(error){setPasswordError(error instanceof Error?error.message:"設定失敗")}finally{setBusy(false)}
     }
     async function changePassword(){
         setPasswordError("");
@@ -370,24 +369,35 @@ function ParentSecuritySettings({passwordSet,security,onPayload,onMessage}:{pass
             onPayload(result);setSecurityCurrentPassword("");setAnswer("");setConfirmAnswer("");setEditingSecurity(false);onMessage("安全提示問題已更新");
         }catch(error){setSecurityError(error instanceof Error?error.message:"更新失敗")}finally{setBusy(false)}
     }
+    function resetPasswordDraft(){
+        setCurrentPassword("");setNewPassword("");setConfirmPassword("");setPasswordError("");
+    }
+    function resetSecurityDraft(){
+        const savedQuestion=SECURITY_QUESTIONS.find(question=>question.value===security.questionType)?.value||"pet";
+        setSecurityCurrentPassword("");setQuestionType(savedQuestion);setCustomQuestion(security.questionType==="custom"?security.questionText:"");setAnswer("");setConfirmAnswer("");setHint(security.hint||"");setSecurityError("");setEditingSecurity(!security.configured);
+    }
     return <>
         <section className="settings-card parent-password-card"><h2>{passwordSet?"🔐 修改家長密碼":"🔐 設定家長密碼"}</h2>
             {passwordSet&&<SecretField label="原始密碼" name="current-parent-password" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" disabled={busy}/>}
             <SecretField label="新密碼" name="new-parent-password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" disabled={busy}/>
             <SecretField label={passwordSet?"確認新密碼":"確認密碼"} name="confirm-parent-password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" disabled={busy}/>
             {passwordError&&<p className="security-form-error" role="alert">{passwordError}</p>}
-            {passwordSet&&<button type="button" className="primary security-submit" disabled={busy} onClick={()=>void changePassword()}>{busy?"更新中…":"更新家長密碼"}</button>}
-            {!passwordSet&&<p className="security-guidance">首次設定密碼時，請一併完成右側的安全提示問題。</p>}
+            {!passwordSet&&<p className="security-guidance">家長密碼與忘記密碼設定會分開儲存。完成密碼設定後，即可設定安全提示問題。</p>}
+            <div className="security-form-actions">
+                <button type="button" className="secondary-security-button" disabled={busy} onClick={resetPasswordDraft}>取消</button>
+                <button type="button" className="primary security-submit" disabled={busy} onClick={()=>void (passwordSet?changePassword():setInitialPassword())}>{busy?(passwordSet?"更新中…":"設定中…"):passwordSet?"確認更新":"確認設定"}</button>
+            </div>
         </section>
         <section className="settings-card parent-recovery-card"><h2>🔑 忘記密碼設定</h2>
             {passwordSet&&security.configured&&!editingSecurity?<div className="security-summary"><span>目前安全問題</span><strong>{security.questionText}</strong>{security.hint&&<small>提示：{security.hint}</small>}<button type="button" className="secondary-security-button" onClick={()=>setEditingSecurity(true)}>修改安全提示問題</button></div>:<>
+                {!passwordSet&&<p className="legacy-security-notice">請先完成上方的家長密碼設定，再設定忘記密碼的安全提示問題。</p>}
                 {passwordSet&&!security.configured&&<p className="legacy-security-notice">尚未設定忘記密碼的安全提示問題。請立即設定，日後才能自行重設密碼。</p>}
                 {passwordSet&&<SecretField label="原始家長密碼" name="security-current-password" value={securityCurrentPassword} onChange={setSecurityCurrentPassword} autoComplete="current-password" disabled={busy}/>}
-                <SecurityQuestionFields questionType={questionType} setQuestionType={setQuestionType} customQuestion={customQuestion} setCustomQuestion={setCustomQuestion} answer={answer} setAnswer={setAnswer} confirmAnswer={confirmAnswer} setConfirmAnswer={setConfirmAnswer} hint={hint} setHint={setHint} disabled={busy}/>
+                <SecurityQuestionFields questionType={questionType} setQuestionType={setQuestionType} customQuestion={customQuestion} setCustomQuestion={setCustomQuestion} answer={answer} setAnswer={setAnswer} confirmAnswer={confirmAnswer} setConfirmAnswer={setConfirmAnswer} hint={hint} setHint={setHint} disabled={busy||!passwordSet}/>
                 {securityError&&<p className="security-form-error" role="alert">{securityError}</p>}
                 <div className="security-form-actions">
-                    {passwordSet&&security.configured&&<button type="button" className="secondary-security-button" disabled={busy} onClick={()=>{setEditingSecurity(false);setSecurityError("");setAnswer("");setConfirmAnswer("")}}>取消</button>}
-                    <button type="button" className="primary security-submit" disabled={busy} onClick={()=>void (passwordSet?updateSecurity():setInitialPassword())}>{busy?"處理中…":passwordSet?"更新安全問題":"設定密碼"}</button>
+                    <button type="button" className="secondary-security-button" disabled={busy} onClick={resetSecurityDraft}>取消</button>
+                    <button type="button" className="primary security-submit" disabled={busy||!passwordSet} onClick={()=>void updateSecurity()}>{busy?"處理中…":security.configured?"確認更新":"確認設定"}</button>
                 </div>
             </>}
         </section>

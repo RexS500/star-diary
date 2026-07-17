@@ -57,6 +57,26 @@ test("family settings use a reversible draft and a safe-area sticky save bar", a
   assert.match(draft, /normalizeSettingsForComparison/);
 });
 
+test("parent password and recovery settings have independent confirm and cancel controls", async () => {
+  const [home, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  const start = home.indexOf("function ParentSecuritySettings(");
+  const end = home.indexOf("function ForgotPasswordModal(", start);
+  const block = home.slice(start, end);
+  assert.match(block, /function resetPasswordDraft\(\)/);
+  assert.match(block, /function resetSecurityDraft\(\)/);
+  assert.match(block, /passwordSet\?changePassword\(\):setInitialPassword\(\)/);
+  assert.match(block, /onClick=\{\(\)=>void updateSecurity\(\)\}/);
+  assert.match(block, /disabled=\{busy\|\|!passwordSet\}/);
+  assert.match(block, /確認設定/);
+  assert.match(block, />取消<\/button>/);
+  assert.doesNotMatch(block, /passwordSet\?updateSecurity\(\):setInitialPassword\(\)/);
+  assert.match(css, /\.security-form-actions button:disabled/);
+  assert.match(css, /\.security-form-actions button:focus-visible/);
+});
+
 test("record modal keeps one mounted scroll container while the iPhone keyboard changes", async () => {
   const [home, css] = await Promise.all([
     readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),

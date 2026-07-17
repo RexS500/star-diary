@@ -383,16 +383,13 @@ export async function POST(req: Request) {
         if (body.action === "set_parent_password") {
             const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "");
             if (passwordError) throw new ApiError(passwordError, 400);
-            const securityError = validateSecuritySetup(body.securityQuestionType || "", body.securityQuestionText || "", body.securityAnswer || "", body.confirmSecurityAnswer || "");
-            if (securityError) throw new ApiError(securityError, 400);
-            if (!body.securityQuestionText?.trim()) throw new ApiError("請選擇安全提示問題", 400);
             const result = await mutateState(async state => {
                 if (state.passwordHash) throw new ApiError("家長密碼已設定，請使用修改密碼功能", 409);
                 state.passwordHash = await hashSecret(body.newPassword || "");
-                state.securityQuestionType = body.securityQuestionType || "";
-                state.securityQuestionText = body.securityQuestionText.trim();
-                state.securityAnswerHash = await hashSecret(normalizeSecurityAnswer(body.securityAnswer || ""));
-                state.securityAnswerHint = body.securityAnswerHint?.trim() || "";
+                state.securityQuestionType = "";
+                state.securityQuestionText = "";
+                state.securityAnswerHash = "";
+                state.securityAnswerHint = "";
                 state.securityFailedAttempts = 0;
                 state.securityLockedUntil = "";
                 state.securityResetTokenHash = "";

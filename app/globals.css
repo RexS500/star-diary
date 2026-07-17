@@ -211,6 +211,8 @@
 .security-submit,.secondary-security-button{min-height:44px;padding:10px 14px;border-radius:9px;font-weight:900}
 .security-submit{border:0}
 .secondary-security-button{border:1px solid #cbd8e6;background:#fff;color:#41566d}
+.security-form-actions button:disabled{cursor:not-allowed;opacity:.55}
+.security-form-actions button:focus-visible{outline:3px solid #93b9df;outline-offset:2px}
 .security-summary{display:grid;gap:7px;padding:15px;border:1px solid #d9e4f0;border-radius:12px;background:#f8fbff}
 .security-summary span,.security-summary small{color:#64748b;font-size:12px}
 .security-summary strong{color:#2c4056;line-height:1.5}
