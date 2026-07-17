@@ -27,12 +27,17 @@ test("security answers trim outer whitespace and ignore English case", () => {
 test("new secrets use salted PBKDF2 while legacy SHA-256 remains verifiable", async () => {
   const password = "家庭密碼1234";
   const stored = await hashSecret(password);
-  assert.match(stored, /^pbkdf2-sha256\$/);
+  assert.match(stored, /^pbkdf2-sha256\$100000\$/);
   assert.notEqual(stored, password);
   assert.equal(await verifySecret(password, stored), true);
   assert.equal(await verifySecret("錯誤", stored), false);
   const legacy = await sha256Hex(password);
   assert.equal(await verifySecret(password, legacy), true);
+});
+
+test("PBKDF2 settings stay within the Cloudflare Workers limit", async () => {
+  const unsupportedHash = `pbkdf2-sha256$120000${"$"}${"00".repeat(16)}${"$"}${"00".repeat(32)}`;
+  assert.equal(await verifySecret("password", unsupportedHash), false);
 });
 
 test("persistent lock state expires after its timestamp", () => {

@@ -1,5 +1,6 @@
 const PASSWORD_PREFIX = "pbkdf2-sha256";
-const PASSWORD_ITERATIONS = 120_000;
+const PASSWORD_ITERATIONS = 100_000;
+const MAX_SUPPORTED_PBKDF2_ITERATIONS = 100_000;
 const PASSWORD_MIN_LENGTH = 4;
 const encoder = new TextEncoder();
 
@@ -65,7 +66,7 @@ export async function verifySecret(value: string, storedHash: string) {
     const parts = storedHash.split("$");
     if (parts.length === 4 && parts[0] === PASSWORD_PREFIX) {
         const iterations = Number(parts[1]), salt = fromHex(parts[2]), expected = fromHex(parts[3]);
-        if (!Number.isInteger(iterations) || iterations < 10_000 || !salt || !expected) return false;
+        if (!Number.isInteger(iterations) || iterations < 10_000 || iterations > MAX_SUPPORTED_PBKDF2_ITERATIONS || !salt || !expected) return false;
         const actual = await derivePbkdf2(value, salt, iterations);
         return equalBytes(actual, expected);
     }
