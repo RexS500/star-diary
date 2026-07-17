@@ -8,7 +8,10 @@ import {
 } from "../app/settings-draft.ts";
 
 const state = () => ({
-  children: [{ id: "c1", name: "Max", gender: "boy", avatar: "boy", stars: 20 }],
+  children: [
+    { id: "c1", name: "Max", gender: "boy", avatar: "boy", stars: 20 },
+    { id: "c2", name: "Mia", gender: "girl", avatar: "girl", stars: 10 },
+  ],
   entries: [],
   redemptions: [],
   specialRewards: [],
@@ -16,7 +19,7 @@ const state = () => ({
   rewards: [{ id: "r1", icon: "🍦", name: "冰淇淋", cost: 12, stock: 0 }],
   rewardIconLibrary: [],
   dailyTasks: [{
-    id: "d1", childId: "c1", title: "刷牙", icon: "🪥", rewardStars: 1,
+    id: "d1", applicableChildIds: ["c1"], title: "刷牙", icon: "🪥", rewardStars: 1,
     weekdays: [1, 2, 3, 4, 5], enabled: true, sortOrder: 0,
     createdAt: "2026-07-16T00:00:00.000Z", updatedAt: "2026-07-16T00:00:00.000Z", scheduleStart: "2026-07-16",
   }],
@@ -27,6 +30,7 @@ const state = () => ({
 test("initial settings and an equivalent recreated object have the same signature", () => {
   const original = state(), recreated = clonePersistedState(original);
   recreated.dailyTasks[0].weekdays = [5, 4, 3, 2, 1, 1];
+  recreated.dailyTasks[0].applicableChildIds = ["c1", "c1"];
   recreated.dailyTasks[0].updatedAt = "2026-07-16T01:00:00.000Z";
   assert.equal(settingsSignature(recreated), settingsSignature(original));
 });
@@ -59,6 +63,7 @@ test("all editable setting families affect the signature", () => {
     draft => { draft.dailyTasks[0].weekdays = [6, 7]; },
     draft => { draft.dailyTasks[0].enabled = false; },
     draft => { draft.dailyTasks[0].sortOrder = 2; },
+    draft => { draft.dailyTasks[0].applicableChildIds = ["c1", "c2"]; },
     draft => { draft.dailyTaskSettings.c1.goalValue = 90; },
     draft => { draft.dailyTaskSettings.c1.goalMode = "count"; },
     draft => { draft.dailyTaskSettings.c1.completionMode = "approval"; },

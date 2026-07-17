@@ -6,7 +6,7 @@ export type DailyTaskCompletionMode = "instant" | "approval";
 
 export type DailyTaskDefinition = {
     id: string;
-    childId: string;
+    applicableChildIds: string[];
     title: string;
     icon: string;
     rewardStars: number;
@@ -143,13 +143,12 @@ export function taskProgress(records: DailyTaskRecord[]): TaskProgress {
 
 export function dailyTaskDayView(
     records: DailyTaskRecord[],
-    definitions: Pick<DailyTaskDefinition, "id" | "childId" | "sortOrder">[],
+    definitions: Pick<DailyTaskDefinition, "id" | "sortOrder">[],
     childId: string,
     dateKey: string,
 ) {
     const sortOrder = new Map(
         definitions
-            .filter(task => task.childId === childId)
             .map(task => [task.id, task.sortOrder]),
     );
     const todayRecords = records

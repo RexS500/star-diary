@@ -90,17 +90,18 @@ function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
     const nowIso = new Date().toISOString(), today = taipeiDateKey();
     if (!Array.isArray(value)) return [];
     return value.map((raw, index) => {
-        const task = asRecord(raw), childId = typeof task.childId === "string" ? task.childId : "";
-        if (!childIds.has(childId)) return null;
+        const task = asRecord(raw), legacyChildId = typeof task.childId === "string" ? task.childId : "";
+        const rawApplicable = Array.isArray(task.applicableChildIds) ? task.applicableChildIds : legacyChildId ? [legacyChildId] : [];
+        const applicableChildIds = [...new Set(rawApplicable.filter((childId): childId is string => typeof childId === "string" && childIds.has(childId)))];
         const createdAt = validIso(task.createdAt) ? task.createdAt : nowIso;
         return {
             id: typeof task.id === "string" && task.id ? task.id : crypto.randomUUID(),
-            childId,
+            applicableChildIds,
             title: typeof task.title === "string" && task.title.trim() ? task.title.trim() : "新任務",
             icon: typeof task.icon === "string" && task.icon.trim() ? task.icon : "⭐",
             rewardStars: positiveInt(task.rewardStars),
             weekdays: uniqueWeekdays(task.weekdays),
-            enabled: task.enabled !== false,
+            enabled: task.enabled !== false && applicableChildIds.length > 0,
             sortOrder: Number.isFinite(Number(task.sortOrder)) ? Math.floor(Number(task.sortOrder)) : index,
             createdAt,
             updatedAt: validIso(task.updatedAt) ? task.updatedAt : createdAt,
@@ -109,12 +110,12 @@ function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
     }).filter((task): task is DailyTaskDefinition => Boolean(task)).sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt));
 }
 
-function normalizeDailyTaskRecords(value: unknown, childIds: Set<string>) {
+function normalizeDailyTaskRecords(value: unknown, _childIds: Set<string>) {
     const statuses = new Set<DailyTaskStatus>(["pending", "completed", "skipped", "pending_approval"]), nowIso = new Date().toISOString();
     if (!Array.isArray(value)) return [];
     return value.map(raw => {
         const record = asRecord(raw), childId = typeof record.childId === "string" ? record.childId : "", definitionId = typeof record.definitionId === "string" ? record.definitionId : "";
-        if (!childIds.has(childId) || !definitionId || !validDateKey(record.date)) return null;
+        if (!childId || !definitionId || !validDateKey(record.date)) return null;
         const inferredStatus: DailyTaskStatus = record.completedAt || record.rewardEntryId ? "completed" : record.requestedAt ? "pending_approval" : record.skippedAt ? "skipped" : "pending";
         const status = statuses.has(record.status as DailyTaskStatus) ? record.status as DailyTaskStatus : inferredStatus;
         const normalized: DailyTaskRecord = {
@@ -168,9 +169,9 @@ function normalizeState(value: unknown): StoredState {
     const rawSettings = asRecord(state.dailyTaskSettings), settings: DailyTaskSettingsMap = {};
     for (const childId of childIds) settings[childId] = taskSettingsForChild(rawSettings as DailyTaskSettingsMap, childId);
     state.dailyTaskSettings = settings;
-    const taskOwners = new Map((state.dailyTasks as DailyTaskDefinition[]).map(task => [task.id, task.childId])), goalByDay = new Map<string, { goalMode: DailyTaskSettings["goalMode"]; goalValue: number }>();
-    const normalizedRecords: DailyTaskRecord[] = (state.dailyTaskRecords as DailyTaskRecord[]).filter(record => !taskOwners.has(record.definitionId) || taskOwners.get(record.definitionId) === record.childId).map(record => {
-        const key = `${record.childId}|${record.date}`, existing = goalByDay.get(key), childSettings = settings[record.childId];
+    const goalByDay = new Map<string, { goalMode: DailyTaskSettings["goalMode"]; goalValue: number }>();
+    const normalizedRecords: DailyTaskRecord[] = (state.dailyTaskRecords as DailyTaskRecord[]).map(record => {
+        const key = `${record.childId}|${record.date}`, existing = goalByDay.get(key), childSettings = taskSettingsForChild(settings, record.childId);
         const goalMode = record.goalModeSnapshot || existing?.goalMode || childSettings.goalMode, goalValue = record.goalValueSnapshot || existing?.goalValue || childSettings.goalValue;
         goalByDay.set(key, { goalMode, goalValue });
         return { ...record, goalModeSnapshot: goalMode, goalValueSnapshot: goalValue };
@@ -198,13 +199,13 @@ function materializeDailyTaskRecords(state: StoredState, throughDate = taipeiDat
     for (const record of state.dailyTaskRecords) if (record.goalModeSnapshot && Number.isFinite(record.goalValueSnapshot)) goals.set(`${record.childId}|${record.date}`, { goalMode: record.goalModeSnapshot, goalValue: Number(record.goalValueSnapshot) });
     for (const task of state.dailyTasks) {
         if (!task.enabled || task.scheduleStart > throughDate) continue;
-        for (const date of calendarDateRange(task.scheduleStart, throughDate)) {
-            const key = `${task.id}|${task.childId}|${date}`;
+        for (const childId of task.applicableChildIds) for (const date of calendarDateRange(task.scheduleStart, throughDate)) {
+            const key = `${task.id}|${childId}|${date}`;
             if (existing.has(key) || !isTaskScheduled(task, date)) continue;
             existing.add(key);
-            const goalKey = `${task.childId}|${date}`, childSettings = taskSettingsForChild(state.dailyTaskSettings, task.childId), goal = goals.get(goalKey) || { goalMode: childSettings.goalMode, goalValue: childSettings.goalValue };
+            const goalKey = `${childId}|${date}`, childSettings = taskSettingsForChild(state.dailyTaskSettings, childId), goal = goals.get(goalKey) || { goalMode: childSettings.goalMode, goalValue: childSettings.goalValue };
             goals.set(goalKey, goal);
-            additions.push({ id: crypto.randomUUID(), definitionId: task.id, childId: task.childId, date, titleSnapshot: task.title, iconSnapshot: task.icon, rewardStarsSnapshot: task.rewardStars, goalModeSnapshot: goal.goalMode, goalValueSnapshot: goal.goalValue, status: "pending", createdAt: nowIso, updatedAt: nowIso });
+            additions.push({ id: crypto.randomUUID(), definitionId: task.id, childId, date, titleSnapshot: task.title, iconSnapshot: task.icon, rewardStarsSnapshot: task.rewardStars, goalModeSnapshot: goal.goalMode, goalValueSnapshot: goal.goalValue, status: "pending", createdAt: nowIso, updatedAt: nowIso });
         }
     }
     if (additions.length) state.dailyTaskRecords = [...additions, ...state.dailyTaskRecords];
@@ -216,9 +217,10 @@ function prepareTaskDefinitionsForSave(previous: DailyTaskDefinition[], incoming
     return incoming.map((task, index) => {
         const old = oldById.get(task.id);
         if (!old) return { ...task, sortOrder: index, createdAt: nowIso, updatedAt: nowIso, scheduleStart: today };
-        const scheduleChanged = old.enabled !== task.enabled || old.weekdays.join(",") !== task.weekdays.join(",");
+        const applicabilityChanged = old.applicableChildIds.join(",") !== task.applicableChildIds.join(",");
+        const scheduleChanged = old.enabled !== task.enabled || old.weekdays.join(",") !== task.weekdays.join(",") || applicabilityChanged;
         const changed = scheduleChanged || old.title !== task.title || old.icon !== task.icon || old.rewardStars !== task.rewardStars || old.sortOrder !== index;
-        return { ...task, childId: old.childId, sortOrder: index, createdAt: old.createdAt, scheduleStart: scheduleChanged && task.enabled ? today : old.scheduleStart, updatedAt: changed ? nowIso : old.updatedAt };
+        return { ...task, sortOrder: index, createdAt: old.createdAt, scheduleStart: scheduleChanged && task.enabled ? today : old.scheduleStart, updatedAt: changed ? nowIso : old.updatedAt };
     });
 }
 
@@ -227,8 +229,8 @@ function reconcileTodayPendingRecords(state: StoredState) {
     state.dailyTaskRecords = state.dailyTaskRecords.flatMap(record => {
         if (record.date !== today || record.status !== "pending") return [record];
         const task = definitions.get(record.definitionId);
-        if (!task || !isTaskScheduled(task, today)) return [];
-        return [{ ...record, childId: task.childId, titleSnapshot: task.title, iconSnapshot: task.icon, rewardStarsSnapshot: task.rewardStars, updatedAt: nowIso }];
+        if (!task || !task.applicableChildIds.includes(record.childId) || !isTaskScheduled(task, today)) return [];
+        return [{ ...record, titleSnapshot: task.title, iconSnapshot: task.icon, rewardStarsSnapshot: task.rewardStars, updatedAt: nowIso }];
     });
 }
 
@@ -575,6 +577,15 @@ export async function POST(req: Request) {
             for (const raw of body.state.entries) {
                 const entry = asRecord(raw);
                 if (entry.occurredAt !== undefined && (!validIso(entry.occurredAt) || Date.parse(entry.occurredAt) > Date.now())) throw new ApiError("紀錄時間不可晚於現在", 400);
+            }
+        }
+        if (Array.isArray(body.state.dailyTasks)) {
+            const submittedChildren = Array.isArray(body.state.children) ? body.state.children : current.state.children;
+            const validChildIds = new Set(submittedChildren.map(raw => asRecord(raw).id).filter((id): id is string => typeof id === "string" && Boolean(id)));
+            for (const raw of body.state.dailyTasks) {
+                const task = asRecord(raw), legacyChildId = typeof task.childId === "string" ? task.childId : "";
+                const applicable = Array.isArray(task.applicableChildIds) ? task.applicableChildIds : legacyChildId ? [legacyChildId] : [];
+                if (task.enabled !== false && !applicable.some(childId => typeof childId === "string" && validChildIds.has(childId))) throw new ApiError("啟用的每日任務請至少選擇一位適用孩子", 400);
             }
         }
         const next = normalizeState({

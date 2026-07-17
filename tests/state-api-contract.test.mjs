@@ -35,3 +35,11 @@ test("child entries cannot submit an occurrence time and parent saves reject fut
   assert.match(source, /submitted\.occurredAt/);
   assert.match(source, /Date\.parse\(entry\.occurredAt\) > Date\.now\(\)/);
 });
+
+test("daily tasks migrate legacy child ownership and materialize independent child records", () => {
+  assert.match(source, /legacyChildId \? \[legacyChildId\] : \[\]/);
+  assert.match(source, /for \(const childId of task\.applicableChildIds\)/);
+  assert.match(source, /const key = `\$\{task\.id\}\|\$\{childId\}\|\$\{date\}`/);
+  assert.match(source, /task\.enabled !== false && !applicable\.some/);
+  assert.match(source, /Array\.isArray\(body\.state\.children\) \? body\.state\.children : current\.state\.children/);
+});

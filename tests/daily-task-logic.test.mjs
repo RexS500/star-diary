@@ -64,9 +64,9 @@ test("skipped tasks leave both numerator and denominator", () => {
 
 test("today summary and task sections share the same child and date records", () => {
   const definitions = [
-    { id: "task-2", childId: "c1", sortOrder: 1 },
-    { id: "task-1", childId: "c1", sortOrder: 0 },
-    { id: "task-3", childId: "c2", sortOrder: 0 },
+    { id: "task-2", applicableChildIds: ["c1"], sortOrder: 1 },
+    { id: "task-1", applicableChildIds: ["c1", "c2"], sortOrder: 0 },
+    { id: "task-3", applicableChildIds: ["c2"], sortOrder: 0 },
   ];
   const records = [
     record("2026-07-16", "pending", "2"),
@@ -83,8 +83,8 @@ test("today summary and task sections share the same child and date records", ()
 
 test("today summary updates with completed and skipped task cards", () => {
   const definitions = [
-    { id: "task-1", childId: "c1", sortOrder: 0 },
-    { id: "task-2", childId: "c1", sortOrder: 1 },
+    { id: "task-1", applicableChildIds: ["c1"], sortOrder: 0 },
+    { id: "task-2", applicableChildIds: ["c1"], sortOrder: 1 },
   ];
   const oneCompleted = dailyTaskDayView([
     record("2026-07-16", "completed", "1"),
@@ -111,8 +111,8 @@ test("today summary updates with completed and skipped task cards", () => {
 
 test("today task view switches children and treats approval as pending", () => {
   const definitions = [
-    { id: "task-1", childId: "c1", sortOrder: 0 },
-    { id: "task-2", childId: "c2", sortOrder: 0 },
+    { id: "task-1", applicableChildIds: ["c1", "c2"], sortOrder: 0 },
+    { id: "task-2", applicableChildIds: ["c2"], sortOrder: 0 },
   ];
   const records = [
     record("2026-07-16", "pending", "1"),

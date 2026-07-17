@@ -119,3 +119,16 @@ test("weekly analytics share real child records across both modes and responsive
   assert.match(css, /\.donut-chart/);
   assert.match(css, /\.mobile-redemption-cards/);
 });
+
+test("daily task settings expose shared child applicability controls", async () => {
+  const [home, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(home, /applicableChildIds/);
+  assert.match(home, />全選</);
+  assert.match(home, />全部取消</);
+  assert.match(home, /請至少選擇一位適用孩子/);
+  assert.match(css, /\.task-child-options/);
+  assert.match(css, /\.daily-task-settings-card\.has-error/);
+});

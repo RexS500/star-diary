@@ -45,7 +45,7 @@ export function normalizeSettingsForComparison(state: ComparableSettingsState, n
     })),
     dailyTasks: state.dailyTasks.map(task => ({
       id: text(task.id),
-      childId: text(task.childId),
+      applicableChildIds: [...new Set(task.applicableChildIds.map(text).filter(Boolean))].sort(),
       title: text(task.title),
       icon: text(task.icon),
       rewardStars: number(task.rewardStars),

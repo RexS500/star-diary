@@ -230,3 +230,17 @@
   .security-form-actions{display:grid;grid-template-columns:1fr 1fr}
   .security-form-actions button{width:100%;min-width:0}
 }
+
+/* Shared daily task definitions and child applicability */
+.daily-task-settings-card.has-error{border-color:#e8aaa4;border-left-color:#b42318}
+.task-children-field{grid-column:1/-1;min-width:0;margin:0;padding:13px;border:1px solid #d7e2ee;border-radius:11px;background:#fff}
+.task-children-field legend{padding:0 5px;color:#53657a;font-size:12px;font-weight:900}
+.task-child-options,.task-child-shortcuts{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.task-child-options button{min-width:0;min-height:44px;display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid #cbd8e6;border-radius:999px;background:#fff;color:#334155;font-weight:900;overflow-wrap:anywhere}
+.task-child-options button span{width:18px;height:18px;flex:0 0 18px;display:grid;place-items:center;border:1px solid #aab9c8;border-radius:50%;font-size:12px}
+.task-child-options button[aria-pressed="true"]{border-color:#2563a6;background:#dbeafe;color:#174d7f;box-shadow:inset 0 0 0 1px #2563a6}
+.task-child-options button[aria-pressed="true"] span{border-color:#2563a6;background:#2563a6;color:#fff}
+.task-child-shortcuts{margin-top:10px}
+.task-child-shortcuts button{min-height:40px;padding:7px 11px;border:1px solid #b9cce3;border-radius:8px;background:#eef5fd;color:#1d5f9b;font-weight:900}
+.task-child-error{margin:10px 0 0;color:#b42318;font-size:12px;font-weight:900}
+@media(max-width:560px){.task-child-options{display:grid;grid-template-columns:minmax(0,1fr)}.task-child-options button{width:100%;justify-content:flex-start}.task-child-shortcuts{display:grid;grid-template-columns:1fr 1fr}.task-child-shortcuts button{width:100%}}
