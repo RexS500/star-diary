@@ -11,6 +11,8 @@ type NavigatorWithStandalone = Navigator & { standalone?: boolean };
 
 const DISMISS_KEY = "star-diary-install-dismissed-at";
 const DISMISS_FOR_MS = 7 * 24 * 60 * 60 * 1000;
+const APP_READY_EVENT = "star-diary:ready";
+const MAX_SPLASH_MS = 300;
 
 function isStandaloneMode() {
   return window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as NavigatorWithStandalone).standalone);
@@ -30,8 +32,16 @@ export function PwaManager() {
   const reloadingRef=useRef(false);
 
   useEffect(()=>{
-    const timer=window.setTimeout(()=>setShowLaunchSplash(false),isStandaloneMode()?1100:0);
-    return()=>window.clearTimeout(timer);
+    let frame=0;
+    const finish=()=>{if(!frame)frame=window.requestAnimationFrame(()=>setShowLaunchSplash(false))};
+    if(!isStandaloneMode()){
+      const timer=window.setTimeout(finish,0);
+      return()=>{window.clearTimeout(timer);window.cancelAnimationFrame(frame)};
+    }
+    window.addEventListener(APP_READY_EVENT,finish,{once:true});
+    if(document.documentElement.dataset.starDiaryReady==="true")finish();
+    const timer=window.setTimeout(finish,MAX_SPLASH_MS);
+    return()=>{window.clearTimeout(timer);window.cancelAnimationFrame(frame);window.removeEventListener(APP_READY_EVENT,finish)};
   },[]);
 
   useEffect(()=>{
@@ -87,11 +97,8 @@ export function PwaManager() {
   return <>
     {showLaunchSplash&&<div className="pwa-launch-splash" aria-hidden="true">
       <div className="pwa-launch-brand">
-        {/* A plain cached image keeps the launch surface immediate and layout-stable. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/star-diary-logo.jpg" alt="" width={512} height={512}/>
-        <strong>星星日記</strong>
-        <span>STAR DIARY</span>
       </div>
     </div>}
     <div className="pwa-manager">

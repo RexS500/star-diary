@@ -1,6 +1,6 @@
 /* Star Diary service worker: live family data stays network-first; only safe GET responses are cached. */
 const BUILD_ID = new URL(self.location.href).searchParams.get("v") || "development";
-const CACHE_PREFIX = "star-diary";
+const CACHE_PREFIX = "star-diary-pwa-v2";
 const SHELL_CACHE = `${CACHE_PREFIX}-shell-${BUILD_ID}`;
 const RUNTIME_CACHE = `${CACHE_PREFIX}-runtime-${BUILD_ID}`;
 const DATA_CACHE = `${CACHE_PREFIX}-data-${BUILD_ID}`;
@@ -23,7 +23,7 @@ self.addEventListener("install", event => {
 self.addEventListener("activate", event => {
   event.waitUntil((async () => {
     const active = new Set([SHELL_CACHE, RUNTIME_CACHE, DATA_CACHE]);
-    await Promise.all((await caches.keys()).filter(name => name.startsWith(`${CACHE_PREFIX}-`) && !active.has(name)).map(name => caches.delete(name)));
+    await Promise.all((await caches.keys()).filter(name => name.startsWith("star-diary") && !active.has(name)).map(name => caches.delete(name)));
     await self.clients.claim();
   })());
 });

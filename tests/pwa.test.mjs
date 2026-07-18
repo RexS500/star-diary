@@ -31,19 +31,20 @@ test("Apple and browser assets are generated from the project logo at valid size
   assert.deepEqual(pngSize(await read("public/android-chrome-192.png")), { width: 192, height: 192 });
   assert.deepEqual(pngSize(await read("public/android-chrome-512.png")), { width: 512, height: 512 });
   assert.deepEqual(pngSize(await read("public/splash-1170x2532.png")), { width: 1170, height: 2532 });
+  assert.deepEqual(pngSize(await read("public/launch-v2-1170x2532.png")), { width: 1170, height: 2532 });
   const ico = await read("public/favicon.ico");
   assert.equal(ico.readUInt16LE(0), 0);
   assert.equal(ico.readUInt16LE(2), 1);
   assert.equal(ico.readUInt16LE(4), 1);
   const generator = await readFile(new URL("scripts/generate-pwa-assets.ps1", root), "utf8");
   assert.match(generator, /#2563A6/);
-  assert.match(generator, /width \* 0\.525/);
-  assert.match(generator, /S T A R   D I A R Y/);
+  assert.match(generator, /width \* 0\.32/);
+  assert.match(generator, /launch-v2-/);
 });
 
 test("service worker caches the shell while protecting live state and version checks", async () => {
   const sw = await readFile(new URL("public/sw.js", root), "utf8");
-  assert.match(sw, /CACHE_PREFIX = "star-diary"/);
+  assert.match(sw, /CACHE_PREFIX = "star-diary-pwa-v2"/);
   assert.match(sw, /request\.method !== "GET"/);
   assert.match(sw, /url\.pathname === "\/api\/state"/);
   assert.match(sw, /networkFirst\(request, DATA_CACHE\)/);
@@ -53,19 +54,23 @@ test("service worker caches the shell while protecting live state and version ch
   assert.match(sw, /staleWhileRevalidate/);
   assert.match(sw, /SKIP_WAITING/);
   assert.match(sw, /caches\.delete/);
+  assert.match(sw, /startsWith\("star-diary"\)/);
 });
 
 test("PWA metadata, installation guidance and automatic version checks are wired into the app", async () => {
-  const [layout, manager, home, versionRoute, vite] = await Promise.all([
+  const [layout, manager, home, css, versionRoute, vite] = await Promise.all([
     readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("app/pwa-manager.tsx", root), "utf8"),
     readFile(new URL("app/star-home.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
     readFile(new URL("app/api/version/route.ts", root), "utf8"),
     readFile(new URL("vite.config.ts", root), "utf8"),
   ]);
   assert.match(layout, /manifest: "\/manifest\.json"/);
   assert.match(layout, /appleWebApp/);
   assert.match(layout, /startupImage/);
+  assert.match(layout, /launch-v2-1170x2532\.png/);
+  assert.match(layout, /meta name="theme-color" content="#2563a6"/);
   assert.match(layout, /viewportFit: "cover"/);
   assert.match(layout, /<PwaManager\/>/);
   assert.match(manager, /beforeinstallprompt/);
@@ -74,8 +79,13 @@ test("PWA metadata, installation guidance and automatic version checks are wired
   assert.match(manager, /Version \{__STAR_DIARY_VERSION__\}/);
   assert.match(manager, /serviceWorker\.register/);
   assert.match(manager, /pwa-launch-splash/);
-  assert.match(manager, /STAR DIARY/);
-  assert.match(manager, /isStandaloneMode\(\)\?1100:0/);
+  assert.match(manager, /MAX_SPLASH_MS = 300/);
+  assert.match(manager, /star-diary:ready/);
+  assert.doesNotMatch(manager, /1100/);
+  assert.doesNotMatch(manager, /STAR DIARY/);
+  assert.match(css, /\.pwa-launch-splash[^}]+background:#2563a6/);
+  assert.match(css, /\.pwa-launch-brand img[^}]+width:min\(32vw,132px\)/);
+  assert.doesNotMatch(css, /pwa-brand-reveal|pwa-splash-finish/);
   assert.match(home, /className="visually-hidden">正在載入家庭資料/);
   assert.match(versionRoute, /Cache-Control.*no-store/);
   assert.match(vite, /rev-list", "--count", "HEAD"/);

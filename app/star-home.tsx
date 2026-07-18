@@ -632,6 +632,12 @@ export default function App() {
     const showSettingsSaveBar=role==="家長"&&tab==="家庭設定"&&(hasUnsavedChanges||invalidIntegerFields.size>0||imageUploading||savingSettings);
     useEffect(() => { reloadState().finally(() => setLoading(false)); }, []);
     useEffect(()=>{
+        if(loading)return;
+        document.documentElement.dataset.starDiaryReady="true";
+        const frame=window.requestAnimationFrame(()=>window.dispatchEvent(new Event("star-diary:ready")));
+        return()=>window.cancelAnimationFrame(frame);
+    },[loading]);
+    useEffect(()=>{
         const syncFromLocation=()=>{
             if(tab!=="家庭設定")return;
             const fromHash=settingsTabFromHash(window.location.hash);
