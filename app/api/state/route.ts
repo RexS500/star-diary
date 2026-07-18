@@ -72,6 +72,7 @@ class ApiError extends Error {
 const asRecord = (value: unknown): JsonRecord => value && typeof value === "object" && !Array.isArray(value) ? { ...(value as JsonRecord) } : {};
 const imageIdentity = (value: string) => value.replace(/([?&])v=[^&]*/g, "").replace(/[?&]$/, "");
 const positiveInt = (value: unknown) => Math.max(1, Math.abs(Math.floor(Number(value) || 1)));
+const isPositiveInteger = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 1;
 const validDateKey = isCalendarDateKey;
 const validIso = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
 const uniqueWeekdays = (value: unknown) => {
@@ -416,12 +417,13 @@ export async function POST(req: Request) {
         if (body.action === "update_security_question") {
             const securityError = validateSecuritySetup(body.securityQuestionType || "", body.securityQuestionText || "", body.securityAnswer || "", body.confirmSecurityAnswer || "");
             if (securityError) throw new ApiError(securityError, 400);
-            if (!body.securityQuestionText?.trim()) throw new ApiError("請選擇安全提示問題", 400);
+            const securityQuestionText = body.securityQuestionText?.trim();
+            if (!securityQuestionText) throw new ApiError("請選擇安全提示問題", 400);
             const result = await mutateState(async state => {
                 if (!state.passwordHash) throw new ApiError("請先設定家長密碼", 409);
                 await requireOriginalParentPassword(state, body.currentPassword || "");
                 state.securityQuestionType = body.securityQuestionType || "";
-                state.securityQuestionText = body.securityQuestionText.trim();
+                state.securityQuestionText = securityQuestionText;
                 state.securityAnswerHash = await hashSecret(normalizeSecurityAnswer(body.securityAnswer || ""));
                 state.securityAnswerHint = body.securityAnswerHint?.trim() || "";
                 state.securityFailedAttempts = 0;
@@ -586,6 +588,15 @@ export async function POST(req: Request) {
                 const task = asRecord(raw), legacyChildId = typeof task.childId === "string" ? task.childId : "";
                 const applicable = Array.isArray(task.applicableChildIds) ? task.applicableChildIds : legacyChildId ? [legacyChildId] : [];
                 if (task.enabled !== false && !applicable.some(childId => typeof childId === "string" && validChildIds.has(childId))) throw new ApiError("啟用的每日任務請至少選擇一位適用孩子", 400);
+                if (!isPositiveInteger(task.rewardStars)) throw new ApiError("每日任務獎勵必須是至少 1 的整數", 400);
+            }
+        }
+        if (Array.isArray(body.state.rewards) && body.state.rewards.some(raw => !isPositiveInteger(asRecord(raw).cost))) throw new ApiError("獎品需要星星必須是至少 1 的整數", 400);
+        if (Array.isArray(body.state.templates) && body.state.templates.some(raw => !isPositiveInteger(asRecord(raw).amount))) throw new ApiError("快速指標數量必須是至少 1 的整數", 400);
+        if (body.state.dailyTaskSettings && typeof body.state.dailyTaskSettings === "object") {
+            for (const raw of Object.values(asRecord(body.state.dailyTaskSettings))) {
+                const setting = asRecord(raw), maximum = setting.goalMode === "percentage" ? 100 : Number.MAX_SAFE_INTEGER;
+                if (!isPositiveInteger(setting.goalValue) || setting.goalValue > maximum) throw new ApiError(setting.goalMode === "percentage" ? "每日完成率必須是 1 到 100 的整數" : "每日達標數量必須是至少 1 的整數", 400);
             }
         }
         const next = normalizeState({

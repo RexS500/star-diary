@@ -93,7 +93,7 @@ test("record modal keeps one mounted scroll container while the iPhone keyboard 
   assert.match(modal, /scrollIntoView\(\{block:"nearest",inline:"nearest",behavior:"smooth"\}\)/);
   assert.doesNotMatch(modal, /scrollTo\s*\(|\.scrollTop\s*=|autoFocus|block:\s*["']start["']/);
   assert.match(modal, /value=\{name\}[^>]*onChange=\{event=>setName\(event\.target\.value\)\}/);
-  assert.match(modal, /獎勵數量<input[^>]*value=\{n\}[^>]*onChange=\{event=>setN\(/);
+  assert.match(modal, /獎勵數量<EditableIntegerInput[^>]*onChange=\{setN\}/);
   assert.match(modal, /if\(await onSave\([^)]*\)\)onClose\(\)/);
   assert.match(css, /\.record-modal-back\{[^}]*overflow:hidden;[^}]*overscroll-behavior:contain/);
   assert.match(css, /\.record-modal\{[^}]*100dvh[^}]*overflow-y:auto;[^}]*overscroll-behavior:contain;[^}]*-webkit-overflow-scrolling:touch/);
@@ -131,4 +131,19 @@ test("daily task settings expose shared child applicability controls", async () 
   assert.match(home, /請至少選擇一位適用孩子/);
   assert.match(css, /\.task-child-options/);
   assert.match(css, /\.daily-task-settings-card\.has-error/);
+});
+
+test("quantity fields share an editable integer input and mobile stepper", async () => {
+  const [home, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(home, /function EditableIntegerInput/);
+  assert.match(home, /inputMode="numeric"/);
+  assert.match(home, /pattern="\[0-9\]\*"/);
+  assert.match(home, /aria-label="減少 1"/);
+  assert.match(home, /aria-label="增加 1"/);
+  for (const field of ["reward-cost-", "task-reward-", "template-amount-", "daily-goal-", "record-stars", "record-special"]) assert.match(home, new RegExp(field));
+  assert.match(home, /invalidIntegerFields\.size/);
+  assert.match(css, /\.integer-control/);
 });

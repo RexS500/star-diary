@@ -43,3 +43,10 @@ test("daily tasks migrate legacy child ownership and materialize independent chi
   assert.match(source, /task\.enabled !== false && !applicable\.some/);
   assert.match(source, /Array\.isArray\(body\.state\.children\) \? body\.state\.children : current\.state\.children/);
 });
+
+test("settings saves reject invalid quantity values before normalization", () => {
+  assert.match(source, /isPositiveInteger\(task\.rewardStars\)/);
+  assert.match(source, /isPositiveInteger\(asRecord\(raw\)\.cost\)/);
+  assert.match(source, /isPositiveInteger\(asRecord\(raw\)\.amount\)/);
+  assert.match(source, /setting\.goalValue > maximum/);
+});
