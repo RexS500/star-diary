@@ -151,6 +151,9 @@ test("daily task settings expose shared child applicability controls", async () 
   assert.match(home, /請至少選擇一位適用孩子/);
   assert.match(css, /\.task-child-options/);
   assert.match(css, /\.daily-task-settings-card\.has-error/);
+  assert.ok(home.indexOf('className="settings-card wide daily-goal-settings daily-goal-settings-card"') < home.indexOf('className="settings-card wide daily-task-settings"'));
+  assert.equal(home.match(/的每日達標條件/g)?.length, 1);
+  assert.match(css, /data-active-tab="dailyTasks"[^\n]*daily-goal-settings-card/);
 });
 
 test("quantity fields share an editable integer input and mobile stepper", async () => {

@@ -276,8 +276,9 @@
 .settings-tab-child-control select{min-width:150px;min-height:42px;padding:8px 34px 8px 11px;border:1px solid #bfd0e2;border-radius:10px;background:#fff;color:#304b65;font:800 16px/1.2 "Microsoft JhengHei",sans-serif}
 .settings-active-panel{min-width:0;scroll-margin-top:150px}
 .family-settings-center .settings-grid>.settings-card{display:none}
-.family-settings-center[data-active-tab="children"] .settings-grid>.settings-card:first-child,.family-settings-center[data-active-tab="security"] .settings-grid>.parent-password-card,.family-settings-center[data-active-tab="security"] .settings-grid>.parent-recovery-card,.family-settings-center[data-active-tab="dailyTasks"] .settings-grid>.daily-task-settings,.family-settings-center[data-active-tab="quickActions"] .settings-grid>.quick-indicator-settings,.family-settings-center[data-active-tab="rewards"] .settings-grid>.reward-settings{display:block}
+.family-settings-center[data-active-tab="children"] .settings-grid>.settings-card:first-child,.family-settings-center[data-active-tab="security"] .settings-grid>.parent-password-card,.family-settings-center[data-active-tab="security"] .settings-grid>.parent-recovery-card,.family-settings-center[data-active-tab="dailyTasks"] .settings-grid>.daily-goal-settings-card,.family-settings-center[data-active-tab="dailyTasks"] .settings-grid>.daily-task-settings,.family-settings-center[data-active-tab="quickActions"] .settings-grid>.quick-indicator-settings,.family-settings-center[data-active-tab="rewards"] .settings-grid>.reward-settings{display:block}
 .family-settings-center[data-active-tab="children"] .settings-grid>.settings-card:first-child{grid-column:1/-1}
+.daily-goal-settings-card{margin-top:0}
 
 @media(max-width:560px){
   .family-settings-intro{margin-bottom:12px;font-size:13px}
