@@ -66,10 +66,10 @@ test("PWA metadata, installation guidance and automatic version checks are wired
   assert.match(manager, /beforeinstallprompt/);
   assert.match(manager, /加入 iPhone 主畫面/);
   assert.match(manager, /星星日記已更新/);
-  assert.match(manager, /Version \{__APP_VERSION__\}/);
+  assert.match(manager, /Version \{__STAR_DIARY_VERSION__\}/);
   assert.match(manager, /serviceWorker\.register/);
   assert.match(versionRoute, /Cache-Control.*no-store/);
   assert.match(vite, /rev-list", "--count", "HEAD"/);
-  assert.match(vite, /__APP_VERSION__/);
-  assert.match(vite, /__APP_BUILD_ID__/);
+  assert.match(vite, /__STAR_DIARY_VERSION__/);
+  assert.match(vite, /__STAR_DIARY_BUILD_ID__/);
 });

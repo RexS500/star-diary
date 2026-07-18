@@ -55,10 +55,10 @@ export function PwaManager() {
         worker?.addEventListener("statechange",()=>{if(worker.state==="installed"&&navigator.serviceWorker.controller)setUpdateAvailable(true)});
       });
     };
-    const register=()=>navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(__APP_BUILD_ID__)}`,{scope:"/"}).then(inspectRegistration).catch(()=>undefined);
+    const register=()=>navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(__STAR_DIARY_BUILD_ID__)}`,{scope:"/"}).then(inspectRegistration).catch(()=>undefined);
     if(document.readyState==="complete")void register();else window.addEventListener("load",register,{once:true});
 
-    const checkVersion=()=>fetch("/api/version",{cache:"no-store",headers:{"cache-control":"no-cache"}}).then(response=>response.ok?response.json():null).then(value=>{if(value?.version&&value.version!==__APP_VERSION__)setUpdateAvailable(true)}).catch(()=>undefined);
+    const checkVersion=()=>fetch("/api/version",{cache:"no-store",headers:{"cache-control":"no-cache"}}).then(response=>response.ok?response.json():null).then(value=>{if(value?.version&&value.version!==__STAR_DIARY_VERSION__)setUpdateAvailable(true)}).catch(()=>undefined);
     const visibilityChanged=()=>{if(document.visibilityState==="visible")void checkVersion()};
     void checkVersion();
     document.addEventListener("visibilitychange",visibilityChanged);
@@ -82,6 +82,6 @@ export function PwaManager() {
     {updateAvailable&&<aside className="pwa-notice pwa-update-notice" role="status" aria-live="polite"><div><strong>星星日記已更新</strong><span>點擊重新整理即可使用最新版本。</span></div><button type="button" onClick={applyUpdate}>重新整理</button></aside>}
     {!updateAvailable&&installEvent&&<aside className="pwa-notice pwa-install-notice" aria-label="安裝星星日記"><div><strong>安裝星星日記 App</strong><span>加入桌面後可全螢幕開啟，使用更快速。</span></div><div className="pwa-notice-actions"><button type="button" className="pwa-dismiss" onClick={dismissInstall}>稍後</button><button type="button" onClick={()=>void install()}>安裝 App</button></div></aside>}
     {!updateAvailable&&!installEvent&&showIosHelp&&<aside className="pwa-notice pwa-install-notice" aria-label="將星星日記加入 iPhone 主畫面"><div><strong>加入 iPhone 主畫面</strong><span>請點擊 Safari 的「分享」按鈕，再選擇「加入主畫面」。</span></div><button type="button" className="pwa-dismiss" onClick={dismissInstall}>知道了</button></aside>}
-    <footer className="pwa-version" aria-label={`目前版本 ${__APP_VERSION__}`}>Version {__APP_VERSION__}</footer>
+    <footer className="pwa-version" aria-label={`目前版本 ${__STAR_DIARY_VERSION__}`}>Version {__STAR_DIARY_VERSION__}</footer>
   </div>;
 }
