@@ -57,6 +57,26 @@ test("family settings use a reversible draft and a safe-area sticky save bar", a
   assert.match(draft, /normalizeSettingsForComparison/);
 });
 
+test("family settings use five persistent, mobile-scrollable internal tabs", async () => {
+  const [home, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  for (const key of ["children", "security", "dailyTasks", "quickActions", "rewards"]) assert.match(home, new RegExp(`key: "${key}"`));
+  for (const label of ["孩子資料", "安全設定", "每日任務", "快速指標", "星星寶庫"]) assert.match(home, new RegExp(label));
+  assert.match(home, /useState<SettingsTabKey>\("children"\)/);
+  assert.match(home, /settingsTabFromHash/);
+  assert.match(home, /window\.history\.pushState/);
+  assert.match(home, /SettingsContent\(\)/);
+  assert.match(home, /settingsTabScrollPositions/);
+  assert.match(home, /role="tablist"/);
+  assert.match(home, /role="tabpanel"/);
+  assert.match(css, /\.settings-tabs\{[^}]*overflow-x:auto/);
+  assert.match(css, /\.settings-tabs button\{[^}]*min-height:46px/);
+  assert.match(css, /data-active-tab="dailyTasks"/);
+  assert.match(css, /\.family-settings-center \.settings-grid>\.settings-card\{display:none\}/);
+});
+
 test("parent password and recovery settings have independent confirm and cancel controls", async () => {
   const [home, css] = await Promise.all([
     readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),

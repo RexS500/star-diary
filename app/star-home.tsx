@@ -119,6 +119,18 @@ type SettingsIntent =
     | { kind: "tab"; value: string }
     | { kind: "child"; value: string }
     | { kind: "childMode" };
+type SettingsTabKey = "children" | "security" | "dailyTasks" | "quickActions" | "rewards";
+const SETTINGS_TABS: Array<{ key: SettingsTabKey; icon: string; label: string }> = [
+    { key: "children", icon: "👦", label: "孩子資料" },
+    { key: "security", icon: "🔐", label: "安全設定" },
+    { key: "dailyTasks", icon: "📋", label: "每日任務" },
+    { key: "quickActions", icon: "✨", label: "快速指標" },
+    { key: "rewards", icon: "🎁", label: "星星寶庫" },
+];
+function settingsTabFromHash(hash: string): SettingsTabKey | null {
+    const value = hash.replace(/^#/, "");
+    return SETTINGS_TABS.some(item => item.key === value) ? value as SettingsTabKey : null;
+}
 type PersistOptions = {
     preserveDraftOnFailure?: boolean;
     optimistic?: boolean;
@@ -607,13 +619,45 @@ export default function App() {
     const [crop,setCrop]=useState<CropTarget|null>(null),[todayKey,setTodayKey]=useState(taipeiDateKey()),[taskBusy,setTaskBusy]=useState(""),[taskConfirm,setTaskConfirm]=useState<DailyTaskRecord|null>(null),[taskSyncError,setTaskSyncError]=useState(false),[officialLibraryOpen,setOfficialLibraryOpen]=useState(false);
     const [savedSettingsSignature,setSavedSettingsSignature]=useState(""),[savingSettings,setSavingSettings]=useState(false),[imageUploading,setImageUploading]=useState(false),[keyboardOpen,setKeyboardOpen]=useState(false),[pendingSettingsIntent,setPendingSettingsIntent]=useState<SettingsIntent|null>(null);
     const [invalidIntegerFields,setInvalidIntegerFields]=useState<Set<string>>(()=>new Set()),[integerResetSignal,setIntegerResetSignal]=useState(0);
+    const [settingsTab,setSettingsTab]=useState<SettingsTabKey>("children");
     const setIntegerValidity=useCallback((key:string,invalid:boolean)=>{setInvalidIntegerFields(current=>{const next=new Set(current);if(invalid)next.add(key);else next.delete(key);return next.size===current.size&&[...next].every(item=>current.has(item))?current:next})},[]);
     const revisionRef=useRef(0),settingsDirtyRef=useRef(false),settingsBusyRef=useRef(false),savingSettingsRef=useRef(false),savedStateRef=useRef<State|null>(null),intentTriggerRef=useRef<HTMLElement|null>(null),toastTimerRef=useRef<ReturnType<typeof setTimeout>|null>(null);
+    const settingsPanelRef=useRef<HTMLDivElement|null>(null),settingsTabButtonRefs=useRef<Partial<Record<SettingsTabKey,HTMLButtonElement>>>({}),settingsTabScrollPositions=useRef<Partial<Record<SettingsTabKey,number>>>({});
     const child = data.children.find(c => c.id === cid) || data.children[0];
     const currentSettingsSignature=useMemo(()=>settingsSignature(data,""),[data]);
     const hasUnsavedChanges=Boolean(savedSettingsSignature)&&currentSettingsSignature!==savedSettingsSignature;
     const showSettingsSaveBar=role==="家長"&&tab==="家庭設定"&&(hasUnsavedChanges||invalidIntegerFields.size>0||imageUploading||savingSettings);
     useEffect(() => { reloadState().finally(() => setLoading(false)); }, []);
+    useEffect(()=>{
+        const syncFromLocation=()=>{
+            if(tab!=="家庭設定")return;
+            const fromHash=settingsTabFromHash(window.location.hash);
+            if(fromHash&&fromHash!==settingsTab){settingsTabScrollPositions.current[settingsTab]=window.scrollY;setSettingsTab(fromHash)}
+        };
+        if(tab==="家庭設定"){
+            const fromHash=settingsTabFromHash(window.location.hash);
+            if(fromHash)setSettingsTab(fromHash);
+            else window.history.replaceState(window.history.state,"",`${window.location.pathname}${window.location.search}#children`);
+        }
+        window.addEventListener("popstate",syncFromLocation);
+        window.addEventListener("hashchange",syncFromLocation);
+        return()=>{window.removeEventListener("popstate",syncFromLocation);window.removeEventListener("hashchange",syncFromLocation)};
+    },[settingsTab,tab]);
+    useEffect(()=>{
+        if(tab!=="家庭設定")return;
+        if(settingsTab!=="dailyTasks"&&officialLibraryOpen)setOfficialLibraryOpen(false);
+        if(crop&&((crop.kind==="avatar"&&settingsTab!=="children")||(crop.kind==="reward"&&settingsTab!=="rewards"))){URL.revokeObjectURL(crop.url);setCrop(null)}
+    },[crop,officialLibraryOpen,settingsTab,tab]);
+    useEffect(()=>{
+        if(tab!=="家庭設定")return;
+        const frame=window.requestAnimationFrame(()=>{
+            settingsTabButtonRefs.current[settingsTab]?.scrollIntoView({block:"nearest",inline:"center"});
+            const saved=settingsTabScrollPositions.current[settingsTab];
+            const panelTop=settingsPanelRef.current?window.scrollY+settingsPanelRef.current.getBoundingClientRect().top-16:window.scrollY;
+            window.scrollTo({top:saved??Math.max(0,panelTop),behavior:"auto"});
+        });
+        return()=>window.cancelAnimationFrame(frame);
+    },[settingsTab,tab]);
     useEffect(()=>{if(!hasUnsavedChanges)return;const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue=""};window.addEventListener("beforeunload",warn);return()=>window.removeEventListener("beforeunload",warn)},[hasUnsavedChanges]);
     useEffect(()=>{settingsDirtyRef.current=hasUnsavedChanges;settingsBusyRef.current=hasUnsavedChanges||savingSettings||imageUploading},[hasUnsavedChanges,savingSettings,imageUploading]);
     useEffect(()=>{const refreshDay=()=>setTodayKey(current=>{const next=taipeiDateKey();if(next!==current&&!settingsBusyRef.current)void reloadState();return next});const timer=setInterval(refreshDay,60000);window.addEventListener("focus",refreshDay);return()=>{clearInterval(timer);window.removeEventListener("focus",refreshDay)}},[]);
@@ -796,7 +840,7 @@ export default function App() {
         })}{!rows.length && <p className="empty">尚無紀錄</p>}</div>;
     }
     function RedeemModal() { const r = redeem!, special=r.source==="special",cost=special?0:r.cost,remain=child.stars-cost; return <div className="modal-back"><section className="modal"><button className="close" onClick={() => setRedeem(null)}>×</button><h2>{role==="孩子"?"提出兌換申請":"確認兌換"} {r.icon}</h2><div className="confirm-box"><p>兌換項目<strong>{r.name}</strong></p><p>兌換方式<strong>{special?"特殊獎勵庫存":"使用星星"}</strong></p><p>本次使用<strong>{special?"庫存 1 個":`${cost} 顆`}</strong></p><p>確認後剩餘<strong>{special?`${Math.max(0,r.stock-1)} 個`:`${remain} 顆`}</strong></p></div><button className="save" onClick={() => { const red:Redeem = { id: crypto.randomUUID(), childId: cid, reward: r.name, cost, date: now(),status:role==="孩子"?"pending":"completed",source:special?"special":"star" }, next = role==="孩子"?{...data,redemptions:[red,...data.redemptions]}:{ ...data, redemptions: [red, ...data.redemptions], children: data.children.map(c => c.id === cid ? { ...c, stars: remain } : c),specialRewards:special?specialStock(data.specialRewards,r.name,-1):data.specialRewards }; if(role==="孩子")submitPending("child_redemption",red,next);else persist(next); setRedeem(null); setTab("兌換紀錄"); }}>{role==="孩子"?"送出，等待家長確認":"確認已出貨"}</button></section></div>; }
-    function Settings() {
+    function SettingsContent() {
         const c=child,tasks=[...data.dailyTasks].sort((a,b)=>compareDailyTaskDefinitions(a,b,data.dailyTaskSortMode)),taskSettings=taskSettingsForChild(data.dailyTaskSettings,cid);
         const updateTask=(id:string,patch:Partial<DailyTaskDefinition>)=>editSettings(current=>({...current,dailyTasks:current.dailyTasks.map(task=>task.id===id?{...task,...patch}:task)}));
         const updateTaskSettings=(patch:Partial<DailyTaskSettings>)=>editSettings(current=>({...current,dailyTaskSettings:{...current.dailyTaskSettings,[cid]:{...taskSettingsForChild(current.dailyTaskSettings,cid),...patch}}}));
@@ -830,6 +874,36 @@ export default function App() {
         </section>
         <section className="settings-card wide quick-indicator-settings"><h2>✨ 常用快速指標</h2><div className="template-card-list">{data.templates.map((t,index)=>{const typeName=t.type==="star"?"加星指標":t.type==="deduct"?"扣星指標":"特殊獎勵",typeIcon=t.type==="star"?"⭐":t.type==="deduct"?"➖":"🎁";return <article className={`template-settings-card template-${t.type}`} key={t.id}><h3><span aria-hidden="true">{typeIcon}</span> {typeName} {String(index+1).padStart(2,"0")}</h3><div className="template-card-fields"><label className="template-field">類型<select value={t.type} onChange={e=>editSettings(current=>({...current,templates:current.templates.map(item=>item.id===t.id?{...item,type:e.target.value as Template["type"]}:item)}))}><option value="star">加星</option><option value="deduct">扣星</option><option value="special">特殊獎勵</option></select></label><label className="template-field">指標／獎勵內容<input value={t.title} onChange={e=>editSettings(current=>({...current,templates:current.templates.map(item=>item.id===t.id?{...item,title:e.target.value}:item)}))}/></label><label className="template-field">數量<EditableIntegerInput value={t.amount} onChange={amount=>editSettings(current=>({...current,templates:current.templates.map(item=>item.id===t.id?{...item,amount}:item)}))} fieldKey={`template-amount-${t.id}`} resetSignal={integerResetSignal} onValidityChange={setIntegerValidity}/></label><div className="template-card-actions"><button type="button" className="template-delete" aria-label={`刪除${typeName} ${String(index+1).padStart(2,"0")}`} onClick={()=>editSettings(current=>({...current,templates:current.templates.filter(item=>item.id!==t.id)}))}>刪除此項 🗑</button></div></div></article>})}</div><button className="add-line" onClick={()=>editSettings(current=>({...current,templates:[...current.templates,{id:crypto.randomUUID(),title:"新指標",amount:1,type:"star"}]}))}>＋ 新增快速指標</button></section>
         <section className="settings-card wide reward-settings"><h2>🎁 星星寶庫</h2><p className="reward-settings-help">可選擇內建圖示，或上傳圖片並保存到「我的圖片」重複使用。</p><div className="reward-settings-list">{data.rewards.map((reward,index)=>{const number=String(index+1).padStart(2,"0"),titleId=`reward-setting-${reward.id}`;return <article className="reward-settings-card" key={reward.id} aria-labelledby={titleId}><h3 id={titleId}>🎁 獎品 {number}</h3><div className="reward-settings-fields"><div className="reward-media-field"><span className="reward-control-label">圖示／圖片</span>{renderRewardIconPicker(reward)}</div><label>獎品名稱<input value={reward.name} onChange={event=>editSettings(current=>({...current,rewards:current.rewards.map(item=>item.id===reward.id?{...item,name:event.target.value}:item)}))}/></label><label>需要星星<EditableIntegerInput value={reward.cost} onChange={cost=>editSettings(current=>({...current,rewards:current.rewards.map(item=>item.id===reward.id?{...item,cost}:item)}))} fieldKey={`reward-cost-${reward.id}`} resetSignal={integerResetSignal} onValidityChange={setIntegerValidity} unit="顆"/></label><div className="reward-settings-actions"><button type="button" className="reward-settings-delete" aria-label={`刪除獎品 ${number}`} onClick={()=>confirm(`確定刪除「${reward.name}」？`)&&editSettings(current=>({...current,rewards:current.rewards.filter(item=>item.id!==reward.id)}))}>刪除此項 🗑</button></div></div></article>})}</div><button className="add-line" onClick={()=>editSettings(current=>({...current,rewards:[...current.rewards,{id:crypto.randomUUID(),icon:"🎁",name:"新獎品",cost:10,stock:0}]}))}>＋ 新增獎品</button></section></div>;
+    }
+    function Settings() {
+        const counts:Partial<Record<SettingsTabKey,number>>={children:data.children.length,dailyTasks:data.dailyTasks.length,quickActions:data.templates.length,rewards:data.rewards.length};
+        function selectSettingsTab(next:SettingsTabKey){
+            if(next===settingsTab)return;
+            settingsTabScrollPositions.current[settingsTab]=window.scrollY;
+            setSettingsTab(next);
+            window.history.pushState(window.history.state,"",`${window.location.pathname}${window.location.search}#${next}`);
+        }
+        function handleTabKeyDown(event:ReactKeyboardEvent<HTMLButtonElement>,current:SettingsTabKey){
+            const currentIndex=SETTINGS_TABS.findIndex(item=>item.key===current);
+            const targetIndex=event.key==="Home"?0:event.key==="End"?SETTINGS_TABS.length-1:event.key==="ArrowRight"?(currentIndex+1)%SETTINGS_TABS.length:event.key==="ArrowLeft"?(currentIndex-1+SETTINGS_TABS.length)%SETTINGS_TABS.length:-1;
+            if(targetIndex<0)return;
+            event.preventDefault();
+            const next=SETTINGS_TABS[targetIndex].key;
+            selectSettingsTab(next);
+            window.requestAnimationFrame(()=>settingsTabButtonRefs.current[next]?.focus());
+        }
+        return <div className="family-settings-center" data-active-tab={settingsTab}>
+            <p className="family-settings-intro">管理孩子、任務、獎勵與安全設定。</p>
+            <div className="settings-tabs-shell">
+                <div className="settings-tabs" role="tablist" aria-label="家庭設定分類">
+                    {SETTINGS_TABS.map(item=><button type="button" role="tab" id={`settings-tab-${item.key}`} aria-controls="settings-active-panel" aria-selected={settingsTab===item.key} tabIndex={settingsTab===item.key?0:-1} className={settingsTab===item.key?"is-active":undefined} key={item.key} ref={element=>{settingsTabButtonRefs.current[item.key]=element||undefined}} onKeyDown={event=>handleTabKeyDown(event,item.key)} onClick={()=>selectSettingsTab(item.key)}><span aria-hidden="true">{item.icon}</span><span>{item.label}</span>{typeof counts[item.key]==="number"&&<small>{counts[item.key]}</small>}</button>)}
+                </div>
+            </div>
+            {(settingsTab==="children"||settingsTab==="dailyTasks")&&<label className={`settings-tab-child-selector${settingsTab==="dailyTasks"?" is-compact":""}`}><span>{settingsTab==="children"?"目前編輯的孩子":"每日達標條件套用孩子"}</span><span className="settings-tab-child-control"><Avatar c={child}/><select value={cid} onChange={event=>requestChildChange(event.target.value,event.currentTarget)}>{data.children.map(childOption=><option value={childOption.id} key={childOption.id}>{childOption.name}</option>)}</select></span></label>}
+            <div ref={settingsPanelRef} id="settings-active-panel" className="settings-active-panel" role="tabpanel" aria-labelledby={`settings-tab-${settingsTab}`}>
+                {SettingsContent()}
+            </div>
+        </div>;
     }
 }
 function Avatar({ c }: {
