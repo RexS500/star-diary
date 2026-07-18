@@ -25,6 +25,8 @@ const state = () => ({
   }],
   dailyTaskRecords: [],
   dailyTaskSettings: { c1: { goalMode: "percentage", goalValue: 80, completionMode: "instant" } },
+  favoriteOfficialTaskIds: [],
+  dailyTaskSortMode: "flow",
 });
 
 test("initial settings and an equivalent recreated object have the same signature", () => {
@@ -64,6 +66,10 @@ test("all editable setting families affect the signature", () => {
     draft => { draft.dailyTasks[0].enabled = false; },
     draft => { draft.dailyTasks[0].sortOrder = 2; },
     draft => { draft.dailyTasks[0].applicableChildIds = ["c1", "c2"]; },
+    draft => { draft.dailyTasks[0].timeSlot = "before_bed"; },
+    draft => { draft.dailyTasks[0].customOrder = 3; },
+    draft => { draft.favoriteOfficialTaskIds = ["official-bedtime-brush-teeth"]; },
+    draft => { draft.dailyTaskSortMode = "custom"; },
     draft => { draft.dailyTaskSettings.c1.goalValue = 90; },
     draft => { draft.dailyTaskSettings.c1.goalMode = "count"; },
     draft => { draft.dailyTaskSettings.c1.completionMode = "approval"; },
@@ -112,7 +118,9 @@ test("normalization returns only persisted editable settings", () => {
   assert.deepEqual(Object.keys(normalized).sort(), [
     "children",
     "dailyTaskSettings",
+    "dailyTaskSortMode",
     "dailyTasks",
+    "favoriteOfficialTaskIds",
     "newPasswordDraft",
     "rewardIconLibrary",
     "rewards",

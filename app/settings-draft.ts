@@ -11,6 +11,8 @@ type ComparableSettingsState = {
   rewardIconLibrary: Array<{ id: string; name: string; image: string; hash?: string }>;
   dailyTasks: DailyTaskDefinition[];
   dailyTaskSettings: DailyTaskSettingsMap;
+  favoriteOfficialTaskIds?: string[];
+  dailyTaskSortMode?: "flow" | "custom";
 };
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
@@ -52,11 +54,17 @@ export function normalizeSettingsForComparison(state: ComparableSettingsState, n
       weekdays: [...new Set(task.weekdays.map(Number).filter(day => Number.isInteger(day) && day >= 1 && day <= 7))].sort((left, right) => left - right),
       enabled: task.enabled !== false,
       sortOrder: number(task.sortOrder),
+      customOrder: number(task.customOrder),
+      timeSlot: text(task.timeSlot),
+      sourceType: text(task.sourceType),
+      sourceOfficialTaskId: text(task.sourceOfficialTaskId),
     })),
     dailyTaskSettings: state.children.map(child => {
       const settings = taskSettingsForChild(state.dailyTaskSettings, child.id);
       return { childId: child.id, goalMode: settings.goalMode, goalValue: settings.goalValue, completionMode: settings.completionMode };
     }),
+    favoriteOfficialTaskIds: [...new Set((state.favoriteOfficialTaskIds || []).map(text).filter(Boolean))].sort(),
+    dailyTaskSortMode: state.dailyTaskSortMode === "custom" ? "custom" : "flow",
     newPasswordDraft,
   };
 }

@@ -33,6 +33,8 @@ const initial = {
     dailyTasks: [],
     dailyTaskRecords: [],
     dailyTaskSettings: {},
+    favoriteOfficialTaskIds: [],
+    dailyTaskSortMode: "flow",
     passwordHash: "",
     securityQuestionType: "",
     securityQuestionText: "",
@@ -53,6 +55,8 @@ type StoredState = JsonRecord & {
     dailyTasks: DailyTaskDefinition[];
     dailyTaskRecords: DailyTaskRecord[];
     dailyTaskSettings: DailyTaskSettingsMap;
+    favoriteOfficialTaskIds: string[];
+    dailyTaskSortMode: "flow" | "custom";
     passwordHash: string;
     securityQuestionType: string;
     securityQuestionText: string;
@@ -73,6 +77,7 @@ const asRecord = (value: unknown): JsonRecord => value && typeof value === "obje
 const imageIdentity = (value: string) => value.replace(/([?&])v=[^&]*/g, "").replace(/[?&]$/, "");
 const positiveInt = (value: unknown) => Math.max(1, Math.abs(Math.floor(Number(value) || 1)));
 const isPositiveInteger = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 1;
+const taskTimeSlots = new Set(["wake_up", "before_breakfast", "before_school", "after_school", "after_dinner", "before_bed", "anytime"]);
 const validDateKey = isCalendarDateKey;
 const validIso = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
 const uniqueWeekdays = (value: unknown) => {
@@ -104,11 +109,15 @@ function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
             weekdays: uniqueWeekdays(task.weekdays),
             enabled: task.enabled !== false && applicableChildIds.length > 0,
             sortOrder: Number.isFinite(Number(task.sortOrder)) ? Math.floor(Number(task.sortOrder)) : index,
+            customOrder: Number.isFinite(Number(task.customOrder)) ? Math.floor(Number(task.customOrder)) : index,
+            timeSlot: taskTimeSlots.has(task.timeSlot) ? task.timeSlot : "anytime",
+            sourceType: task.sourceType === "official" ? "official" : "custom",
+            ...(task.sourceType === "official" && typeof task.sourceOfficialTaskId === "string" && task.sourceOfficialTaskId ? { sourceOfficialTaskId: task.sourceOfficialTaskId } : {}),
             createdAt,
             updatedAt: validIso(task.updatedAt) ? task.updatedAt : createdAt,
             scheduleStart: validDateKey(task.scheduleStart) ? task.scheduleStart : today,
         } satisfies DailyTaskDefinition;
-    }).filter((task): task is DailyTaskDefinition => Boolean(task)).sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt));
+    }).sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt));
 }
 
 function normalizeDailyTaskRecords(value: unknown, _childIds: Set<string>) {
@@ -170,6 +179,8 @@ function normalizeState(value: unknown): StoredState {
     const rawSettings = asRecord(state.dailyTaskSettings), settings: DailyTaskSettingsMap = {};
     for (const childId of childIds) settings[childId] = taskSettingsForChild(rawSettings as DailyTaskSettingsMap, childId);
     state.dailyTaskSettings = settings;
+    state.favoriteOfficialTaskIds = Array.isArray(state.favoriteOfficialTaskIds) ? [...new Set(state.favoriteOfficialTaskIds.filter((id:unknown):id is string=>typeof id === "string" && Boolean(id)))] : [];
+    state.dailyTaskSortMode = state.dailyTaskSortMode === "custom" ? "custom" : "flow";
     const goalByDay = new Map<string, { goalMode: DailyTaskSettings["goalMode"]; goalValue: number }>();
     const normalizedRecords: DailyTaskRecord[] = (state.dailyTaskRecords as DailyTaskRecord[]).map(record => {
         const key = `${record.childId}|${record.date}`, existing = goalByDay.get(key), childSettings = taskSettingsForChild(settings, record.childId);
@@ -220,7 +231,7 @@ function prepareTaskDefinitionsForSave(previous: DailyTaskDefinition[], incoming
         if (!old) return { ...task, sortOrder: index, createdAt: nowIso, updatedAt: nowIso, scheduleStart: today };
         const applicabilityChanged = old.applicableChildIds.join(",") !== task.applicableChildIds.join(",");
         const scheduleChanged = old.enabled !== task.enabled || old.weekdays.join(",") !== task.weekdays.join(",") || applicabilityChanged;
-        const changed = scheduleChanged || old.title !== task.title || old.icon !== task.icon || old.rewardStars !== task.rewardStars || old.sortOrder !== index;
+        const changed = scheduleChanged || old.title !== task.title || old.icon !== task.icon || old.rewardStars !== task.rewardStars || old.sortOrder !== index || old.customOrder !== task.customOrder || old.timeSlot !== task.timeSlot;
         return { ...task, sortOrder: index, createdAt: old.createdAt, scheduleStart: scheduleChanged && task.enabled ? today : old.scheduleStart, updatedAt: changed ? nowIso : old.updatedAt };
     });
 }

@@ -139,6 +139,16 @@ test("today task view has an explicit no-task state", () => {
   assert.deepEqual(view.progress, { completed: 0, total: 0, percentage: null });
 });
 
+test("task cards support flow and persisted custom ordering",()=>{
+  const definitions=[
+    {id:"task-1",title:"睡前",timeSlot:"before_bed",sortOrder:0,customOrder:0},
+    {id:"task-2",title:"起床",timeSlot:"wake_up",sortOrder:1,customOrder:1},
+  ];
+  const records=[record("2026-07-16","pending","1"),record("2026-07-16","pending","2")];
+  assert.deepEqual(dailyTaskDayView(records,definitions,"c1","2026-07-16","flow").records.map(item=>item.definitionId),["task-2","task-1"]);
+  assert.deepEqual(dailyTaskDayView(records,definitions,"c1","2026-07-16","custom").records.map(item=>item.definitionId),["task-1","task-2"]);
+});
+
 test("supports all, percentage and count goals", () => {
   assert.equal(goalResult({ completed: 4, total: 4, percentage: 100 }, settings("all", 1)).met, true);
   assert.equal(goalResult({ completed: 3, total: 4, percentage: 75 }, settings("all", 1)).met, false);

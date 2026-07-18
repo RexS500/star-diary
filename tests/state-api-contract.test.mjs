@@ -50,3 +50,11 @@ test("settings saves reject invalid quantity values before normalization", () =>
   assert.match(source, /isPositiveInteger\(asRecord\(raw\)\.amount\)/);
   assert.match(source, /setting\.goalValue > maximum/);
 });
+
+test("official task source, flow fields and favorites survive family persistence",()=>{
+  assert.match(source,/sourceType: task\.sourceType === "official" \? "official" : "custom"/);
+  assert.match(source,/sourceOfficialTaskId/);
+  assert.match(source,/timeSlot: taskTimeSlots\.has/);
+  assert.match(source,/state\.favoriteOfficialTaskIds = Array\.isArray/);
+  assert.match(source,/state\.dailyTaskSortMode = state\.dailyTaskSortMode === "custom"/);
+});

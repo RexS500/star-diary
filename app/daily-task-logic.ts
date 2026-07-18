@@ -3,6 +3,8 @@ export const TAIPEI_TIME_ZONE = "Asia/Taipei";
 export type DailyTaskStatus = "pending" | "completed" | "skipped" | "pending_approval";
 export type DailyTaskGoalMode = "all" | "percentage" | "count";
 export type DailyTaskCompletionMode = "instant" | "approval";
+export type DailyTaskSortMode = "flow" | "custom";
+export type DailyTaskTimeSlot = "wake_up" | "before_breakfast" | "before_school" | "after_school" | "after_dinner" | "before_bed" | "anytime";
 
 export type DailyTaskDefinition = {
     id: string;
@@ -13,6 +15,10 @@ export type DailyTaskDefinition = {
     weekdays: number[];
     enabled: boolean;
     sortOrder: number;
+    customOrder?: number;
+    timeSlot?: DailyTaskTimeSlot;
+    sourceType?: "official" | "custom";
+    sourceOfficialTaskId?: string;
     createdAt: string;
     updatedAt: string;
     scheduleStart: string;
@@ -135,6 +141,12 @@ export function taskSettingsForChild(settings: DailyTaskSettingsMap | undefined,
 
 export type TaskProgress = { completed: number; total: number; percentage: number | null };
 
+export const DAILY_TASK_TIME_SLOT_ORDER:Record<DailyTaskTimeSlot,number>={wake_up:0,before_breakfast:1,before_school:2,after_school:3,after_dinner:4,before_bed:5,anytime:6};
+export function compareDailyTaskDefinitions(left:Pick<DailyTaskDefinition,"title"|"sortOrder"|"customOrder"|"timeSlot">,right:Pick<DailyTaskDefinition,"title"|"sortOrder"|"customOrder"|"timeSlot">,mode:DailyTaskSortMode="flow"){
+    if(mode==="custom")return (left.customOrder??left.sortOrder)-(right.customOrder??right.sortOrder)||(left.title||"").localeCompare(right.title||"","zh-TW");
+    return (DAILY_TASK_TIME_SLOT_ORDER[left.timeSlot||"anytime"]-DAILY_TASK_TIME_SLOT_ORDER[right.timeSlot||"anytime"])||left.sortOrder-right.sortOrder||(left.title||"").localeCompare(right.title||"","zh-TW");
+}
+
 export function taskProgress(records: DailyTaskRecord[]): TaskProgress {
     const effective = records.filter(record => record.status !== "skipped");
     const completed = effective.filter(record => record.status === "completed").length;
@@ -143,13 +155,13 @@ export function taskProgress(records: DailyTaskRecord[]): TaskProgress {
 
 export function dailyTaskDayView(
     records: DailyTaskRecord[],
-    definitions: Pick<DailyTaskDefinition, "id" | "sortOrder">[],
+    definitions: Pick<DailyTaskDefinition, "id" | "title" | "sortOrder" | "customOrder" | "timeSlot">[],
     childId: string,
     dateKey: string,
+    sortMode:DailyTaskSortMode="custom",
 ) {
     const sortOrder = new Map(
-        definitions
-            .map(task => [task.id, task.sortOrder]),
+        [...definitions].sort((left,right)=>compareDailyTaskDefinitions(left,right,sortMode)).map((task,index) => [task.id, index]),
     );
     const todayRecords = records
         .filter(record => record.childId === childId && record.date === dateKey)

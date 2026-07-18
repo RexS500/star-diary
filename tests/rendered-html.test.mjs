@@ -147,3 +147,19 @@ test("quantity fields share an editable integer input and mobile stepper", async
   assert.match(home, /invalidIntegerFields\.size/);
   assert.match(css, /\.integer-control/);
 });
+
+test("official task library is wired into the existing family daily task settings",async()=>{
+  const [home,library,css]=await Promise.all([
+    readFile(new URL("../app/star-home.tsx",import.meta.url),"utf8"),
+    readFile(new URL("../app/official-task-library-modal.tsx",import.meta.url),"utf8"),
+    readFile(new URL("../app/globals.css",import.meta.url),"utf8"),
+  ]);
+  assert.match(home,/從官方任務庫加入/);
+  assert.match(home,/sourceOfficialTaskId:task\.id/);
+  assert.match(home,/dailyTasks:\[\.\.\.current\.dailyTasks,\.\.\.additions\]/);
+  assert.match(home,/favoriteOfficialTaskIds/);
+  for(const text of ["官方任務庫","官方任務包","只看官方推薦","只看我的最愛","已選取","仍然新增一份"])assert.match(library,new RegExp(text));
+  assert.match(css,/safe-area-inset-bottom/);
+  assert.match(css,/\.official-library-shell/);
+  assert.match(css,/@media\(max-width:560px\)/);
+});
