@@ -615,6 +615,7 @@ export async function POST(req: Request) {
                 const task = asRecord(raw), legacyChildId = typeof task.childId === "string" ? task.childId : "";
                 const applicable = Array.isArray(task.applicableChildIds) ? task.applicableChildIds : legacyChildId ? [legacyChildId] : [];
                 if (task.enabled !== false && !applicable.some(childId => typeof childId === "string" && validChildIds.has(childId))) throw new ApiError("啟用的每日任務請至少選擇一位適用孩子", 400);
+                if (task.enabled !== false && uniqueWeekdays(task.weekdays).length === 0) throw new ApiError("啟用的每日任務請至少選擇一個執行星期", 400);
                 if (!isPositiveInteger(task.rewardStars)) throw new ApiError("每日任務獎勵必須是至少 1 的整數", 400);
             }
         }

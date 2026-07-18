@@ -1,3 +1,5 @@
+import { EVERY_DAY, WEEKDAYS } from "./weekday-selection.ts";
+
 export type OfficialTaskCategory="self_care"|"learning"|"exercise"|"character"|"housework"|"social"|"health"|"other";
 export type OfficialTaskTimeSlot="wake_up"|"before_breakfast"|"before_school"|"after_school"|"after_dinner"|"before_bed"|"anytime";
 export type OfficialTaskAgeGroup="age_3_5"|"age_6_8"|"age_9_12"|"age_13_plus"|"all";
@@ -19,8 +21,8 @@ export const TIME_SLOT_META:Record<OfficialTaskTimeSlot,{label:string;icon:strin
   after_school:{label:"放學後",icon:"🏫",order:3},after_dinner:{label:"晚餐後",icon:"🍽️",order:4},before_bed:{label:"睡前",icon:"🌙",order:5},anytime:{label:"全天皆可",icon:"⭐",order:6},
 };
 export const AGE_GROUP_META:Record<OfficialTaskAgeGroup,string>={age_3_5:"3～5 歲",age_6_8:"6～8 歲",age_9_12:"9～12 歲",age_13_plus:"13 歲以上",all:"不限"};
-export const ALL_WEEKDAYS=[1,2,3,4,5,6,7];
-export const SCHOOL_WEEKDAYS=[1,2,3,4,5];
+export const ALL_WEEKDAYS=[...EVERY_DAY];
+export const SCHOOL_WEEKDAYS=[...WEEKDAYS];
 const ALL_AGES:OfficialTaskAgeGroup[]=["age_3_5","age_6_8","age_9_12","age_13_plus"];
 const SCHOOL_AGES:OfficialTaskAgeGroup[]=["age_6_8","age_9_12","age_13_plus"];
 type Seed=[string,string,string,OfficialTaskCategory,OfficialTaskTimeSlot,number,1|2|3|4|5,OfficialTaskAgeGroup[]?,boolean?,number[]?];

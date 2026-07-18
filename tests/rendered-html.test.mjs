@@ -171,6 +171,23 @@ test("quantity fields share an editable integer input and mobile stepper", async
   assert.match(css, /\.integer-control/);
 });
 
+test("daily task weekday shortcuts derive their selected state from weekdays", async () => {
+  const [home, logic, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/weekday-selection.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(home, /preset=weekdayPreset\(task\.weekdays\)/);
+  assert.match(home, /aria-pressed=\{preset==="everyday"\}/);
+  assert.match(home, /aria-pressed=\{preset==="weekdays"\}/);
+  assert.match(home, /aria-pressed=\{preset==="weekend"\}/);
+  assert.match(home, /className="weekday-clear"/);
+  assert.match(home, /missingWeekday&&<p className="task-weekday-error"/);
+  assert.match(home, /invalidWeekdayTask/);
+  assert.match(logic, /normalizeWeekdays/);
+  assert.match(css, /\.weekday-shortcuts button\[aria-pressed="true"\]/);
+});
+
 test("quick indicators are grouped and independently ordered in settings and home", async () => {
   const [home, logic, css] = await Promise.all([
     readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),

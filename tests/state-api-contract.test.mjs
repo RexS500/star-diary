@@ -42,6 +42,7 @@ test("daily tasks migrate legacy child ownership and materialize independent chi
   assert.match(source, /const key = `\$\{task\.id\}\|\$\{childId\}\|\$\{date\}`/);
   assert.match(source, /task\.enabled !== false && !applicable\.some/);
   assert.match(source, /Array\.isArray\(body\.state\.children\) \? body\.state\.children : current\.state\.children/);
+  assert.match(source, /uniqueWeekdays\(task\.weekdays\)\.length === 0/);
 });
 
 test("settings saves reject invalid quantity values before normalization", () => {

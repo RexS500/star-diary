@@ -27,6 +27,7 @@ import {
 import { OfficialTaskLibrary, type OfficialTaskAddConfig } from "./official-task-library-modal";
 import { TIME_SLOT_META, type OfficialTaskTimeSlot } from "./official-task-library";
 import { changeTemplateType, moveTemplateWithinType, normalizeTemplateSortOrders, orderedTemplatesByType, type QuickTemplateType } from "./quick-template-logic";
+import { EVERY_DAY, WEEKDAYS, WEEKDAY_OPTIONS, WEEKEND, normalizeWeekdays, weekdayPreset } from "./weekday-selection";
 import {
     entryAnalyticsDateKey,
     formatRedemptionTime,
@@ -166,7 +167,7 @@ function prepareSettingsForSave(draft:State):State{
     const childIds=new Set(draft.children.map(child=>child.id));
     return {
         ...clonePersistedState(draft),
-        dailyTasks:draft.dailyTasks.map(task=>{const applicableChildIds=task.applicableChildIds.filter(childId=>childIds.has(childId));return{...task,applicableChildIds,enabled:task.enabled&&applicableChildIds.length>0}}),
+        dailyTasks:draft.dailyTasks.map(task=>{const applicableChildIds=task.applicableChildIds.filter(childId=>childIds.has(childId));return{...task,applicableChildIds,weekdays:normalizeWeekdays(task.weekdays),enabled:task.enabled&&applicableChildIds.length>0}}),
         dailyTaskSettings:Object.fromEntries(Object.entries(draft.dailyTaskSettings).filter(([childId])=>childIds.has(childId))),
     };
 }
@@ -175,7 +176,6 @@ const BUILTIN_REWARD_ICONS=[
     {value:"🎁",name:"禮物"},{value:"🍦",name:"冰淇淋"},{value:"🍭",name:"糖果"},{value:"🍔",name:"漢堡"},{value:"🍕",name:"披薩"},{value:"🧋",name:"飲料"},{value:"🎮",name:"遊戲"},{value:"📱",name:"手機／3C"},{value:"🎬",name:"電影"},{value:"📷",name:"相機"},{value:"🧸",name:"玩具"},{value:"⚽",name:"運動"},{value:"🏊",name:"游泳"},{value:"🚲",name:"腳踏車"},{value:"🎡",name:"遊樂園"},{value:"✈️",name:"旅行"},{value:"📚",name:"書籍"},{value:"⭐",name:"星星"},{value:"❤️",name:"愛心"},{value:"💰",name:"零用錢"}
 ];
 const BUILTIN_TASK_ICONS=[{value:"🎒",name:"整理書包"},{value:"📚",name:"功課"},{value:"🪥",name:"刷牙"},{value:"🛏️",name:"整理房間"},{value:"🏊",name:"游泳"},{value:"🧹",name:"家事"},{value:"🍽️",name:"收拾餐具"},{value:"🛁",name:"洗澡"},{value:"👕",name:"整理衣物"},{value:"⭐",name:"其他"}];
-const WEEKDAYS=[{value:1,label:"一"},{value:2,label:"二"},{value:3,label:"三"},{value:4,label:"四"},{value:5,label:"五"},{value:6,label:"六"},{value:7,label:"日"}];
 const RECORD_TYPES:{value:Entry["type"];label:string}[]=[{value:"star",label:"加星"},{value:"deduct",label:"扣星"},{value:"special",label:"特殊獎勵"}];
 const SECURITY_QUESTIONS=[
     {value:"pet",label:"我的第一隻寵物叫什麼名字？"},
@@ -709,7 +709,7 @@ export default function App() {
     function requestChildChange(next:string,trigger?:HTMLElement|null){if(next===cid)return;requestSettingsIntent({kind:"child",value:next},trigger)}
     function continueEditing(){setPendingSettingsIntent(null)}
     function discardAndContinue(){const intent=pendingSettingsIntent;if(!intent)return;const snapshot=restoreSettingsSnapshot(false);setPendingSettingsIntent(null);if(snapshot)performSettingsIntent(intent,snapshot);say("已取消未儲存的變更")}
-    async function saveAllSettings(){if(savingSettingsRef.current||imageUploading)return false;if(invalidIntegerFields.size){say("請先修正空白或超出範圍的數字欄位");return false}if(!hasUnsavedChanges)return true;const invalidTask=data.dailyTasks.find(task=>task.enabled&&!task.applicableChildIds.length);if(invalidTask){say(`「${invalidTask.title}」請至少選擇一位適用孩子`);return false}savingSettingsRef.current=true;setSavingSettings(true);const draft=clonePersistedState(data),next=prepareSettingsForSave(draft);try{return await persist(next,{preserveDraftOnFailure:true,optimistic:false,successMessage:"✅ 已儲存",draftForRebase:draft})}finally{savingSettingsRef.current=false;setSavingSettings(false)}}
+    async function saveAllSettings(){if(savingSettingsRef.current||imageUploading)return false;if(invalidIntegerFields.size){say("請先修正空白或超出範圍的數字欄位");return false}if(!hasUnsavedChanges)return true;const invalidWeekdayTask=data.dailyTasks.find(task=>task.enabled&&!normalizeWeekdays(task.weekdays).length);if(invalidWeekdayTask){say(`「${invalidWeekdayTask.title}」請至少選擇一個執行星期`);return false}const invalidTask=data.dailyTasks.find(task=>task.enabled&&!task.applicableChildIds.length);if(invalidTask){say(`「${invalidTask.title}」請至少選擇一位適用孩子`);return false}savingSettingsRef.current=true;setSavingSettings(true);const draft=clonePersistedState(data),next=prepareSettingsForSave(draft);try{return await persist(next,{preserveDraftOnFailure:true,optimistic:false,successMessage:"✅ 已儲存",draftForRebase:draft})}finally{savingSettingsRef.current=false;setSavingSettings(false)}}
     async function enterParent() { if(role==="家長")return;if (!passwordSet) {
         setRole("家長");
         goTab("家庭設定");
@@ -865,15 +865,15 @@ export default function App() {
         <section className="settings-card wide daily-task-settings">
             <div className="daily-task-settings-head"><div><h2>📋 每日任務設定</h2><p>建立一次任務，再選擇適用的孩子。每位孩子的完成狀態與星星獎勵會分開計算。</p></div><label className="daily-task-sort">排序<select value={data.dailyTaskSortMode} onChange={event=>setTaskSortMode(event.target.value as DailyTaskSortMode)}><option value="flow">依一天流程</option><option value="custom">自訂排序</option></select></label></div>
             {tasks.length?<div className="daily-task-settings-list">{tasks.map((task,index)=>{
-                const missingChild=task.enabled&&!task.applicableChildIds.length;
-                return <article className={`daily-task-settings-card${task.enabled?"":" is-disabled"}${missingChild?" has-error":""}`} key={task.id}>
+                const missingChild=task.enabled&&!task.applicableChildIds.length,missingWeekday=task.enabled&&!normalizeWeekdays(task.weekdays).length,preset=weekdayPreset(task.weekdays);
+                return <article className={`daily-task-settings-card${task.enabled?"":" is-disabled"}${missingChild||missingWeekday?" has-error":""}`} key={task.id}>
                     <h3>📋 每日任務 {String(index+1).padStart(2,"0")} {task.sourceType==="official"&&<span className="official-source-badge">📚 官方任務</span>}</h3>
                     <div className="daily-task-settings-fields">
                         <label>任務名稱<input value={task.title} onChange={e=>updateTask(task.id,{title:e.target.value})}/></label>
                         <label>任務圖示<select value={task.icon} onChange={e=>updateTask(task.id,{icon:e.target.value})}>{!BUILTIN_TASK_ICONS.some(icon=>icon.value===task.icon)&&<option value={task.icon}>{task.icon} 官方圖示</option>}{BUILTIN_TASK_ICONS.map(icon=><option value={icon.value} key={icon.value}>{icon.value} {icon.name}</option>)}</select></label>
                         <label>建議時段<select value={task.timeSlot||"anytime"} onChange={event=>updateTask(task.id,{timeSlot:event.target.value as OfficialTaskTimeSlot})}>{Object.entries(TIME_SLOT_META).map(([value,meta])=><option value={value} key={value}>{meta.icon} {meta.label}</option>)}</select></label>
                         <label>完成獎勵<EditableIntegerInput key={`task-reward-${task.id}-${integerResetSignal}`} value={task.rewardStars} onChange={rewardStars=>updateTask(task.id,{rewardStars})} fieldKey={`task-reward-${task.id}`} onValidityChange={setIntegerValidity} unit="顆星"/></label>
-                        <div className="task-weekday-field"><span>執行星期</span><div className="weekday-buttons">{WEEKDAYS.map(day=><button type="button" key={day.value} aria-pressed={task.weekdays.includes(day.value)} onClick={()=>updateTask(task.id,{weekdays:task.weekdays.includes(day.value)?task.weekdays.filter(value=>value!==day.value):[...task.weekdays,day.value].sort((a,b)=>a-b)})}>{day.label}</button>)}</div><div className="weekday-shortcuts"><button type="button" onClick={()=>updateTask(task.id,{weekdays:[1,2,3,4,5,6,7]})}>每天</button><button type="button" onClick={()=>updateTask(task.id,{weekdays:[1,2,3,4,5]})}>平日</button><button type="button" onClick={()=>updateTask(task.id,{weekdays:[6,7]})}>週末</button><button type="button" onClick={()=>updateTask(task.id,{weekdays:[]})}>清除</button></div></div>
+                        <div className="task-weekday-field"><span>執行星期</span><div className="weekday-buttons">{WEEKDAY_OPTIONS.map(day=><button type="button" key={day.value} aria-pressed={task.weekdays.includes(day.value)} onClick={()=>updateTask(task.id,{weekdays:normalizeWeekdays(task.weekdays.includes(day.value)?task.weekdays.filter(value=>value!==day.value):[...task.weekdays,day.value])})}>{day.label}</button>)}</div><div className="weekday-shortcuts" aria-label="執行星期快捷選取"><button type="button" aria-pressed={preset==="everyday"} onClick={()=>updateTask(task.id,{weekdays:[...EVERY_DAY]})}>每天</button><button type="button" aria-pressed={preset==="weekdays"} onClick={()=>updateTask(task.id,{weekdays:[...WEEKDAYS]})}>平日</button><button type="button" aria-pressed={preset==="weekend"} onClick={()=>updateTask(task.id,{weekdays:[...WEEKEND]})}>週末</button><button type="button" className="weekday-clear" onClick={()=>updateTask(task.id,{weekdays:[]})}>清除</button></div>{missingWeekday&&<p className="task-weekday-error" role="alert">請至少選擇一個執行星期</p>}</div>
                         <fieldset className="task-children-field"><legend>適用孩子</legend><div className="task-child-options">{data.children.map(childOption=>{const selected=task.applicableChildIds.includes(childOption.id);return <button type="button" key={childOption.id} aria-pressed={selected} onClick={()=>updateTask(task.id,{applicableChildIds:selected?task.applicableChildIds.filter(id=>id!==childOption.id):[...task.applicableChildIds,childOption.id]})}><span aria-hidden="true">{selected?"✓":""}</span>{childOption.name}</button>})}</div>{data.children.length>1&&<div className="task-child-shortcuts"><button type="button" onClick={()=>updateTask(task.id,{applicableChildIds:data.children.map(item=>item.id)})}>全選</button><button type="button" onClick={()=>updateTask(task.id,{applicableChildIds:[]})}>全部取消</button></div>}{missingChild&&<p className="task-child-error" role="alert">請至少選擇一位適用孩子</p>}</fieldset>
                         <label className="task-enabled"><input type="checkbox" checked={task.enabled} onChange={e=>{if(e.target.checked&&!task.applicableChildIds.length){say("請先選擇至少一位適用孩子");return}updateTask(task.id,{enabled:e.target.checked})}}/><span>啟用此任務</span></label>
                         <div className="daily-task-order-actions"><button type="button" disabled={index===0} onClick={()=>moveTask(task.id,-1)}>↑ 上移</button><button type="button" disabled={index===tasks.length-1} onClick={()=>moveTask(task.id,1)}>↓ 下移</button></div>
