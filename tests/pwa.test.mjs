@@ -14,8 +14,8 @@ test("web manifest is installable and uses the complete Star Diary icon set", as
   assert.equal(manifest.orientation, "portrait");
   assert.equal(manifest.start_url, "/");
   assert.equal(manifest.scope, "/");
-  assert.equal(manifest.theme_color, "#286248");
-  assert.equal(manifest.background_color, "#ffffff");
+  assert.equal(manifest.theme_color, "#2563a6");
+  assert.equal(manifest.background_color, "#2563a6");
   for (const size of [72, 96, 128, 144, 152, 192, 384, 512]) {
     const icon = manifest.icons.find(item => item.src === `/icon-${size}.png`);
     assert.equal(icon?.sizes, `${size}x${size}`);
@@ -35,6 +35,10 @@ test("Apple and browser assets are generated from the project logo at valid size
   assert.equal(ico.readUInt16LE(0), 0);
   assert.equal(ico.readUInt16LE(2), 1);
   assert.equal(ico.readUInt16LE(4), 1);
+  const generator = await readFile(new URL("scripts/generate-pwa-assets.ps1", root), "utf8");
+  assert.match(generator, /#2563A6/);
+  assert.match(generator, /width \* 0\.525/);
+  assert.match(generator, /S T A R   D I A R Y/);
 });
 
 test("service worker caches the shell while protecting live state and version checks", async () => {
@@ -52,9 +56,10 @@ test("service worker caches the shell while protecting live state and version ch
 });
 
 test("PWA metadata, installation guidance and automatic version checks are wired into the app", async () => {
-  const [layout, manager, versionRoute, vite] = await Promise.all([
+  const [layout, manager, home, versionRoute, vite] = await Promise.all([
     readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("app/pwa-manager.tsx", root), "utf8"),
+    readFile(new URL("app/star-home.tsx", root), "utf8"),
     readFile(new URL("app/api/version/route.ts", root), "utf8"),
     readFile(new URL("vite.config.ts", root), "utf8"),
   ]);
@@ -68,6 +73,10 @@ test("PWA metadata, installation guidance and automatic version checks are wired
   assert.match(manager, /星星日記已更新/);
   assert.match(manager, /Version \{__STAR_DIARY_VERSION__\}/);
   assert.match(manager, /serviceWorker\.register/);
+  assert.match(manager, /pwa-launch-splash/);
+  assert.match(manager, /STAR DIARY/);
+  assert.match(manager, /isStandaloneMode\(\)\?1100:0/);
+  assert.match(home, /className="visually-hidden">正在載入家庭資料/);
   assert.match(versionRoute, /Cache-Control.*no-store/);
   assert.match(vite, /rev-list", "--count", "HEAD"/);
   assert.match(vite, /__STAR_DIARY_VERSION__/);

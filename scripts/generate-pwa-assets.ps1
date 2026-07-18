@@ -9,7 +9,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $public = Join-Path $root "public"
 if (-not $LogoPath) { $LogoPath = Join-Path $public "star-diary-logo.jpg" }
 $source = [System.Drawing.Image]::FromFile($LogoPath)
-$primary = [System.Drawing.ColorTranslator]::FromHtml("#286248")
+$primary = [System.Drawing.ColorTranslator]::FromHtml("#2563A6")
 $white = [System.Drawing.Color]::White
 
 function New-SquarePng([string]$name, [int]$size, [bool]$maskable = $false) {
@@ -42,11 +42,19 @@ function New-SplashPng([int]$width, [int]$height) {
     $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
     $graphics.Clear($primary)
-    $logoSize = [int][Math]::Round([Math]::Min($width * 0.42, $height * 0.28))
+
+    # The logo is 25% larger than the previous splash composition.
+    $logoSize = [int][Math]::Round([Math]::Min($width * 0.525, $height * 0.30))
+    $logoToTitleGap = [int][Math]::Round($width * 0.052)
+    $titleBand = [int][Math]::Round($width * 0.072)
+    $titleToSubtitleGap = [int][Math]::Round($width * 0.018)
+    $subtitleBand = [int][Math]::Round($width * 0.042)
+    $contentHeight = $logoSize + $logoToTitleGap + $titleBand + $titleToSubtitleGap + $subtitleBand
     $left = [int](($width - $logoSize) / 2)
-    $top = [int](($height - $logoSize) / 2)
-    $diameter = [int][Math]::Round($logoSize * 0.30)
+    $top = [int](($height - $contentHeight) / 2)
+    $diameter = [int][Math]::Round($logoSize * 0.36)
     $path = [System.Drawing.Drawing2D.GraphicsPath]::new()
     $path.AddArc($left, $top, $diameter, $diameter, 180, 90)
     $path.AddArc($left + $logoSize - $diameter, $top, $diameter, $diameter, 270, 90)
@@ -57,6 +65,27 @@ function New-SplashPng([int]$width, [int]$height) {
     $graphics.DrawImage($source, $left, $top, $logoSize, $logoSize)
     $graphics.ResetClip()
     $path.Dispose()
+
+    $titleFont = [System.Drawing.Font]::new("Microsoft JhengHei UI", [single]($width * 0.055), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $subtitleFont = [System.Drawing.Font]::new("Segoe UI", [single]($width * 0.028), [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Pixel)
+    $titleBrush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+    $subtitleBrush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(205, 255, 255, 255))
+    $format = [System.Drawing.StringFormat]::new()
+    try {
+      $format.Alignment = [System.Drawing.StringAlignment]::Center
+      $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+      $titleTop = $top + $logoSize + $logoToTitleGap
+      $titleText = -join @([char]0x661F, [char]0x661F, [char]0x65E5, [char]0x8A18)
+      $graphics.DrawString($titleText, $titleFont, $titleBrush, [System.Drawing.RectangleF]::new(0, $titleTop, $width, $titleBand), $format)
+      $subtitleTop = $titleTop + $titleBand + $titleToSubtitleGap
+      $graphics.DrawString("S T A R   D I A R Y", $subtitleFont, $subtitleBrush, [System.Drawing.RectangleF]::new(0, $subtitleTop, $width, $subtitleBand), $format)
+    } finally {
+      $format.Dispose()
+      $titleBrush.Dispose()
+      $subtitleBrush.Dispose()
+      $titleFont.Dispose()
+      $subtitleFont.Dispose()
+    }
     $bitmap.Save((Join-Path $public "splash-${width}x${height}.png"), [System.Drawing.Imaging.ImageFormat]::Png)
   } finally {
     $graphics.Dispose()

@@ -10,8 +10,8 @@
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
   "orientation": "portrait",
-  "theme_color": "#286248",
-  "background_color": "#ffffff",
+  "theme_color": "#2563a6",
+  "background_color": "#2563a6",
   "categories": ["family", "lifestyle", "productivity"],
   "icons": [
     { "src": "/icon-72.png", "sizes": "72x72", "type": "image/png", "purpose": "any" },
