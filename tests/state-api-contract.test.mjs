@@ -58,3 +58,10 @@ test("official task source, flow fields and favorites survive family persistence
   assert.match(source,/state\.favoriteOfficialTaskIds = Array\.isArray/);
   assert.match(source,/state\.dailyTaskSortMode = state\.dailyTaskSortMode === "custom"/);
 });
+
+test("quick indicator type ordering persists while legacy arrays remain compatible",()=>{
+  assert.match(source,/function normalizeTemplates/);
+  assert.match(source,/templateTypes\.has\(template\.type\)/);
+  assert.match(source,/Number\.isFinite\(Number\(template\.sortOrder\)\)/);
+  assert.match(source,/state\.templates = normalizeTemplates\(state\.templates\)/);
+});

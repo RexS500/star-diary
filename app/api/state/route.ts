@@ -27,7 +27,7 @@ const initial = {
     entries: [],
     rewards: [{ id: "r1", icon: "🍦", name: "冰淇淋", cost: 12, stock: 0 }, { id: "r2", icon: "🎮", name: "遊戲 30 分鐘", cost: 20, stock: 0 }],
     specialRewards: [],
-    templates: [{ id: "t1", title: "主動整理書包", amount: 3, type: "star" }, { id: "t2", title: "幫忙做家事", amount: 2, type: "star" }],
+    templates: [{ id: "t1", title: "主動整理書包", amount: 3, type: "star", sortOrder: 0 }, { id: "t2", title: "幫忙做家事", amount: 2, type: "star", sortOrder: 1 }],
     redemptions: [],
     rewardIconLibrary: [],
     dailyTasks: [],
@@ -78,6 +78,7 @@ const imageIdentity = (value: string) => value.replace(/([?&])v=[^&]*/g, "").rep
 const positiveInt = (value: unknown) => Math.max(1, Math.abs(Math.floor(Number(value) || 1)));
 const isPositiveInteger = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 1;
 const taskTimeSlots = new Set(["wake_up", "before_breakfast", "before_school", "after_school", "after_dinner", "before_bed", "anytime"]);
+const templateTypes = new Set(["star", "deduct", "special"]);
 const validDateKey = isCalendarDateKey;
 const validIso = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
 const uniqueWeekdays = (value: unknown) => {
@@ -90,6 +91,21 @@ function normalizeRewards(value: unknown) {
         const reward = asRecord(raw), icon = typeof reward.icon === "string" && reward.icon.trim() ? reward.icon : "🎁", image = typeof reward.image === "string" && reward.image.trim() ? reward.image : undefined;
         return image ? { ...reward, icon, image } : { ...reward, icon, image: undefined };
     }) : [];
+}
+
+function normalizeTemplates(value: unknown) {
+    if (!Array.isArray(value)) return [];
+    return value.map((raw, index) => {
+        const template = asRecord(raw), type = templateTypes.has(template.type) ? template.type : "star";
+        return {
+            ...template,
+            id: typeof template.id === "string" && template.id ? template.id : crypto.randomUUID(),
+            title: typeof template.title === "string" && template.title.trim() ? template.title.trim() : "新指標",
+            amount: positiveInt(template.amount),
+            type,
+            sortOrder: Number.isFinite(Number(template.sortOrder)) ? Math.floor(Number(template.sortOrder)) : index,
+        };
+    });
 }
 
 function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
@@ -153,7 +169,7 @@ function normalizeState(value: unknown): StoredState {
     const state = asRecord(value);
     state.children = Array.isArray(state.children) && state.children.length ? state.children : initial.children;
     state.entries = Array.isArray(state.entries) ? state.entries : [];
-    state.templates = Array.isArray(state.templates) ? state.templates : [];
+    state.templates = normalizeTemplates(state.templates);
     state.redemptions = Array.isArray(state.redemptions) ? state.redemptions : [];
     const legacyRewards = Array.isArray(state.rewards) ? state.rewards : [];
     if (!Array.isArray(state.specialRewards)) {

@@ -171,6 +171,26 @@ test("quantity fields share an editable integer input and mobile stepper", async
   assert.match(css, /\.integer-control/);
 });
 
+test("quick indicators are grouped and independently ordered in settings and home", async () => {
+  const [home, logic, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/quick-template-logic.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(home, /renderTemplateGroup\("star","加星指標","⭐"\).*renderTemplateGroup\("deduct","扣星指標","➖"\)/s);
+  assert.match(home, /renderGroup\("star","⭐ 快速加星".*renderGroup\("deduct","➖ 快速扣星"/s);
+  assert.match(home, /＋ 新增\{typeName\}/);
+  assert.match(home, /↑ 上移/);
+  assert.match(home, /↓ 下移/);
+  assert.match(home, /尚未設定快速加星指標/);
+  assert.match(home, /尚未設定快速扣星指標/);
+  assert.match(logic, /moveTemplateWithinType/);
+  assert.match(logic, /changeTemplateType/);
+  assert.match(css, /\.template-type-star/);
+  assert.match(css, /\.template-type-deduct/);
+  assert.match(css, /\.home-template-buttons \.deduct-pick/);
+});
+
 test("official task library is wired into the existing family daily task settings",async()=>{
   const [home,library,css]=await Promise.all([
     readFile(new URL("../app/star-home.tsx",import.meta.url),"utf8"),

@@ -6,7 +6,7 @@ import {
 
 type ComparableSettingsState = {
   children: Array<{ id: string; name: string; gender: string; avatar: string }>;
-  templates: Array<{ id: string; title: string; amount: number; type: string }>;
+  templates: Array<{ id: string; title: string; amount: number; type: string; sortOrder?: number }>;
   rewards: Array<{ id: string; icon: string; name: string; cost: number; image?: string }>;
   rewardIconLibrary: Array<{ id: string; name: string; image: string; hash?: string }>;
   dailyTasks: DailyTaskDefinition[];
@@ -31,6 +31,7 @@ export function normalizeSettingsForComparison(state: ComparableSettingsState, n
       title: text(template.title),
       amount: number(template.amount),
       type: text(template.type),
+      sortOrder: number(template.sortOrder),
     })),
     rewards: state.rewards.map(reward => ({
       id: text(reward.id),

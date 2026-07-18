@@ -68,6 +68,18 @@
 }
 
 /* Quick indicator settings: soft independent cards without affecting the reward editor */
+.quick-indicator-help{margin:-5px 0 18px;color:#5f6f82;font-size:13px;line-height:1.6}
+.template-type-groups{display:grid;gap:22px;min-width:0}
+.template-type-group{min-width:0;padding:16px;border:1px solid #eadfae;border-radius:16px;background:#fffdf5}
+.template-type-group.template-type-star{border-color:#eadfae;background:#fffdf5}
+.template-type-group.template-type-deduct{border-color:#efd1cd;background:#fff8f7}
+.template-type-group.template-type-special{border-color:#ddd8ef;background:#faf9ff}
+.template-type-group>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:13px}
+.template-type-group>header h3{margin:0;color:#334155;font-size:18px}
+.template-type-group>header h3 small{display:inline-grid;min-width:25px;height:25px;margin-left:5px;place-items:center;border-radius:999px;background:#fff;color:#53657a;font-size:11px}
+.template-type-group>header p{margin:4px 0 0;color:#6a7787;font-size:12px}
+.template-group-empty{margin:0;padding:15px;border:1px dashed #d5dce5;border-radius:11px;background:#ffffffb8;color:#68798b;text-align:center}
+.template-type-group>.add-line{margin-top:13px}
 .template-card-list{display:grid;gap:14px}
 .template-settings-card{position:relative;max-width:100%;min-width:0;padding:16px;border:1px solid #e6dba9;border-left:3px solid #e6b83f;border-radius:14px;background:#fffdf5}
 .template-settings-card.template-deduct{border-color:#f1cfcb;border-left-color:#d87068;background:#fff8f7}
@@ -77,15 +89,36 @@
 .quick-indicator-settings .template-field{display:block;min-width:0;margin:0;color:#53657a;font-size:12px;font-weight:800}
 .quick-indicator-settings .template-field input,.quick-indicator-settings .template-field select{display:block;width:100%;min-width:0;min-height:44px;margin:7px 0 0;padding:10px 12px;border:1px solid #cbd8e6;border-radius:9px;background:#fff;color:var(--ink);font-family:inherit;font-size:16px}
 .quick-indicator-settings .template-field input:focus,.quick-indicator-settings .template-field select:focus{border-color:var(--g);outline:3px solid #dbeafe;outline-offset:0}
-.template-card-actions{display:flex;min-width:0;min-height:44px;align-items:flex-end;justify-content:flex-end}
+.template-card-actions{display:flex;min-width:0;min-height:44px;align-items:flex-end;justify-content:space-between;gap:10px;grid-column:1/-1}
+.template-order-actions{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.template-order-actions button{min-height:40px;padding:8px 11px;border:1px solid #c7d7e7;border-radius:8px;background:#fff;color:#376b9d;font-weight:800}
+.template-order-actions button:disabled{opacity:.42;cursor:not-allowed}
 .template-delete{width:auto;min-height:38px;padding:8px 11px;border:1px solid #f4d3cf;border-radius:8px;background:#fef3f2;color:var(--r);font-size:13px;font-weight:800}
 .template-delete:hover,.template-delete:focus-visible{background:#fde8e6;outline:2px solid #efb8b3;outline-offset:2px}
 @media(max-width:560px){
+  .template-type-group{padding:13px}
   .template-settings-card{padding:14px}
   .template-card-fields{grid-template-columns:minmax(0,1fr);gap:12px}
-  .template-card-actions{justify-content:flex-end}
-  .template-delete{min-height:40px}
+  .template-card-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch}
+  .template-order-actions{display:grid;grid-template-columns:1fr 1fr}
+  .template-order-actions button,.template-delete{min-width:0;min-height:44px}
 }
+
+/* Home quick indicators keep positive and corrective actions in separate ordered groups. */
+.home-template-groups{display:grid;gap:15px;margin-top:18px;min-width:0}
+.home-template-group{min-width:0}
+.home-template-group+.home-template-group{padding-top:14px;border-top:1px solid #dde5ed}
+.home-template-group h3{margin:0 0 8px;color:#335a7d;font-size:13px}
+.home-template-deduct h3{color:#a64f49}
+.home-template-special h3{color:#65549c}
+.home-template-buttons{display:grid;gap:8px;min-width:0}
+.home-template-buttons button{width:100%;min-width:0;min-height:46px;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:9px;padding:10px 12px;border:1px solid #c6d9ed;border-radius:11px;background:#eaf3fd;color:#245f96;text-align:left;font:800 14px/1.4 "Microsoft JhengHei",sans-serif;white-space:normal;overflow-wrap:anywhere}
+.home-template-buttons button>span:first-child{white-space:nowrap;font-size:16px}
+.home-template-buttons .deduct-pick{border-color:#efcfcb;background:#fff0ee;color:#a64f49}
+.home-template-buttons .special-pick{border-color:#dcd6ef;background:#f5f1ff;color:#65549c}
+.home-template-empty{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-radius:10px;background:#f6f8fa;color:#748292;font-size:12px}
+.home-template-empty button{flex:0 0 auto;min-height:38px;padding:7px 10px;border:1px solid #bfd1e3;border-radius:8px;background:#fff;color:#376b9d;font-weight:800}
+@media(max-width:560px){.home-template-empty{align-items:stretch;flex-direction:column}.home-template-empty button{width:100%}.home-template-groups{padding-bottom:env(safe-area-inset-bottom)}}
 
 /* Reward settings cards and reusable built-in/uploaded icon picker */
 .reward-settings-help{margin:-6px 0 16px;color:#5f6f82;font-size:13px;line-height:1.6}
