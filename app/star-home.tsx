@@ -6,6 +6,7 @@ import {
     buildAnalyticsReport,
     earliestAnalyticsDate,
     resolveAnalyticsDateRange,
+    splitAnalyticsRangeIntoWeekPeriods,
     type AnalyticsRangePreset,
 } from "./analytics-report";
 import { clonePersistedState, settingsSignature } from "./settings-draft";
@@ -39,6 +40,7 @@ import {
     formatRedemptionTime,
     formatWeekRange,
     getWeeklyRedemptionSummary,
+    getWeeklyStarAnalytics,
     sortRedemptionSummary,
     type RedemptionSortKey,
     type SortDirection,
@@ -514,16 +516,16 @@ function WeeklySummaryCard({week,redemptionCost}:{week:WeeklyStarAnalytics;redem
     </article>;
 }
 
-function WeeklyDivergingBarChart({week}:{week:WeeklyStarAnalytics}){
+function WeeklyDivergingBarChart({week,scaleMaximum}:{week:WeeklyStarAnalytics;scaleMaximum?:number}){
     const [detail,setDetail]=useState<AnalyticsDetail|null>(null);
-    const maximum=Math.max(1,...week.days.flatMap(day=>[day.starTotal,day.deductTotal]));
+    const maximum=scaleMaximum??Math.max(1,...week.days.flatMap(day=>[day.starTotal,day.deductTotal]));
     const legend=[...week.starItems,...week.deductItems].sort((a,b)=>b.amount-a.amount||b.count-a.count).slice(0,8);
     function show(date:string,item:StarCategory,pinned=false){setDetail(current=>current?.pinned&&!pinned?current:{date,item,pinned})}
     function leave(){setDetail(current=>current?.pinned?current:null)}
     return <article className="weekly-chart-card">
         <div className="analytics-card-heading"><div><h3>{week.period.label}</h3><p>{formatWeekRange(week.period)}</p></div><div className="week-chart-totals"><span className="analytics-positive">+{week.starTotal}</span><span className="analytics-negative">−{week.deductTotal}</span></div></div>
         {legend.length>0&&<div className="weekly-chart-legend" aria-label="主要項目圖例">{legend.map(item=><span key={item.key}><i style={{background:item.color}}/>{item.label}</span>)}{week.starItems.length+week.deductItems.length>legend.length&&<span>其餘項目請點柱段查看</span>}</div>}
-        <div className="weekly-chart-scroll"><div className="weekly-diverging-chart" style={{minWidth:`max(100%, ${week.days.length*48}px)`}} aria-label={`${week.period.label}每日加扣星發散式堆疊直條圖`}>
+        <div className="weekly-diverging-chart" style={{gridTemplateColumns:`repeat(${Math.max(1,week.days.length)}, minmax(0, 1fr))`}} aria-label={`${week.period.label}每日加扣星發散式堆疊直條圖`}>
             {week.days.map(day=><div className={`weekly-day-column ${day.isFuture?"is-future":""}`} key={day.date}>
                 <div className="weekly-chart-half is-positive">
                     {day.starTotal>0&&<div className="weekly-bar-stack positive-stack" style={{height:`${Math.max(7,day.starTotal/maximum*100)}%`}}>{day.starItems.map(item=><button type="button" key={item.key} style={{background:item.color,flexGrow:item.amount}} aria-label={`${day.date} 加星 ${item.label} ${item.amount} 顆，共 ${item.count} 筆`} onMouseEnter={()=>show(day.date,item)} onMouseLeave={leave} onFocus={()=>show(day.date,item)} onBlur={leave} onClick={()=>show(day.date,item,true)}/>)}</div>}
@@ -536,7 +538,7 @@ function WeeklyDivergingBarChart({week}:{week:WeeklyStarAnalytics}){
                 </div>
                 <div className="weekly-day-label"><strong>{day.weekday}</strong><small>{shortAnalyticsDate(day.date)}</small>{day.isFuture&&<em>未來</em>}</div>
             </div>)}
-        </div></div>
+        </div>
         {detail&&<div className="analytics-tooltip" role="status" aria-live="polite"><div><strong>{shortAnalyticsDate(detail.date!)}・星期{week.days.find(day=>day.date===detail.date)?.weekday}</strong><span>{detail.item.type==="star"?"加星":"扣星"}・{detail.item.label}</span></div><div><b className={detail.item.type==="star"?"analytics-positive":"analytics-negative"}>{signedStars(detail.item.amount,detail.item.type)}</b><small>共 {detail.item.count} 筆紀錄</small></div><button type="button" aria-label="關閉圖表提示" onClick={()=>setDetail(null)}>×</button></div>}
         {!week.recordCount&&<p className="analytics-inline-empty">{week.period.label}沒有加星或扣星紀錄，所選日期仍固定顯示為 0。</p>}
     </article>;
@@ -602,8 +604,12 @@ function Analytics({data,child,onRefresh,todayKey}:{data:State;child:Child;onRef
     const earliest=useMemo(()=>earliestAnalyticsDate(child.id,data.entries,data.redemptions,data.dailyTaskRecords,todayKey),[child.id,data.entries,data.redemptions,data.dailyTaskRecords,todayKey]);
     const range=useMemo(()=>resolveAnalyticsDateRange({preset,todayKey,earliestDate:earliest,customStart,customEnd}),[preset,todayKey,earliest,customStart,customEnd]);
     const report=useMemo(()=>buildAnalyticsReport({childId:child.id,childName:child.name,range,todayKey,entries:data.entries,redemptions:data.redemptions,templates:data.templates,dailyTasks:data.dailyTasks,dailyTaskRecords:data.dailyTaskRecords,dailyTaskSettings:data.dailyTaskSettings}),[child.id,child.name,range,todayKey,data.entries,data.redemptions,data.templates,data.dailyTasks,data.dailyTaskRecords,data.dailyTaskSettings]);
+    const chartPeriods=useMemo(()=>splitAnalyticsRangeIntoWeekPeriods(range,todayKey),[range,todayKey]);
+    const chartWeeks=useMemo(()=>chartPeriods.map(item=>getWeeklyStarAnalytics(data.entries,child.id,item,todayKey)),[chartPeriods,data.entries,child.id,todayKey]);
+    const chartMaximum=Math.max(1,...chartWeeks.flatMap(week=>week.days.flatMap(day=>[day.starTotal,day.deductTotal])));
+    const summaryCosts=useMemo(()=>chartPeriods.map(item=>getWeeklyRedemptionSummary(data.redemptions,child.id,item).reduce((sum,row)=>sum+row.totalCost,0)),[chartPeriods,data.redemptions,child.id]);
     const period=analyticsPeriod(range),redemptions=useMemo(()=>getWeeklyRedemptionSummary(data.redemptions,child.id,analyticsPeriod(range)),[data.redemptions,child.id,range]);
-    const redemptionCost=redemptions.reduce((sum,item)=>sum+item.totalCost,0),hasAnyData=report.starAnalysis.recordCount+report.starDetails.filter(item=>item.type==="特殊獎勵").length+report.taskRows.length+report.redemptionRows.length>0;
+    const hasAnyData=report.starAnalysis.recordCount+report.starDetails.filter(item=>item.type==="特殊獎勵").length+report.taskRows.length+report.redemptionRows.length>0;
     const updateTime=()=>setLastUpdated(new Date().toLocaleTimeString("zh-TW",{timeZone:"Asia/Taipei",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}));
     async function refresh(){setRefreshing(true);try{if(await onRefresh())updateTime()}finally{setRefreshing(false)}}
     async function exportExcel(){
@@ -620,8 +626,8 @@ function Analytics({data,child,onRefresh,todayKey}:{data:State;child:Child;onRef
     return <div className="analytics weekly-analytics">
         <section className="analytics-panel analytics-overview"><div className="analytics-title"><div><h2>📊 {child.name} 的資料分析</h2><p>所有圖表、統計與 Excel 共用同一日期範圍；日期與跨日均採 Asia/Taipei。兌換消耗與行為扣星分開統計。</p><small>{range.label}・{range.start} 至 {range.end}</small></div><div className="analytics-title-actions"><button type="button" className="refresh-button" disabled={refreshing||exporting} onClick={()=>void refresh()}>{refreshing?"刷新中…":"↻ 刷新資料"}</button><button type="button" className="primary" disabled={refreshing||exporting} onClick={()=>void exportExcel()}>{exporting?"刷新並匯出中…":"匯出 Excel"}</button>{lastUpdated&&<small>最後更新 {lastUpdated}</small>}</div></div><div className="analytics-range-controls"><label>日期範圍<select value={preset} onChange={event=>setPreset(event.target.value as AnalyticsRangePreset)}><option value="two_weeks">上週＋本週</option><option value="current_month">本月</option><option value="previous_month">上個月</option><option value="last_30_days">最近 30 天</option><option value="custom">自訂日期</option><option value="all">全部紀錄</option></select></label>{preset==="custom"&&<><label>開始日期<input type="date" value={customStart} max={customEnd} onChange={event=>setCustomStart(event.target.value)}/></label><label>結束日期<input type="date" value={customEnd} min={customStart} onChange={event=>setCustomEnd(event.target.value)}/></label></>}</div></section>
         {!hasAnyData&&<section className="analytics-no-data"><span>📊</span><h2>這個日期範圍尚無紀錄</h2><p>每日統計與 Excel 仍會保留每一天並顯示 0，或可切換其他日期範圍。</p></section>}
-        <section aria-labelledby="weekly-summary-title"><div className="analytics-section-title"><div><h2 id="weekly-summary-title">日期範圍摘要</h2><p>兌換是消費紀錄，不會算成扣星。</p></div></div><div className="weekly-summary-grid is-single"><WeeklySummaryCard week={report.starAnalysis} redemptionCost={redemptionCost}/></div></section>
-        <section className="analytics-panel" aria-labelledby="weekly-chart-title"><div className="analytics-section-title"><div><h2 id="weekly-chart-title">📊 每日星星變化</h2><p>加星在 0 軸上方，扣星在下方；同項目跨日期維持相同顏色。</p></div></div><div className="weekly-chart-grid is-single"><WeeklyDivergingBarChart week={report.starAnalysis}/></div></section>
+        <section aria-labelledby="weekly-summary-title"><div className="analytics-section-title"><div><h2 id="weekly-summary-title">日期範圍摘要</h2><p>兌換是消費紀錄，不會算成扣星。</p></div></div><div className={`weekly-summary-grid ${chartWeeks.length===1?"is-single":"is-stacked"}`}>{chartWeeks.map((week,index)=><WeeklySummaryCard key={week.period.key} week={week} redemptionCost={summaryCosts[index]??0}/>)}</div></section>
+        <section className="analytics-panel" aria-labelledby="weekly-chart-title"><div className="analytics-section-title"><div><h2 id="weekly-chart-title">📊 每日星星變化</h2><p>每週各自固定在完整寬度中；加星在 0 軸上方，扣星在下方，同項目跨週維持相同顏色。</p></div></div><div className="weekly-chart-list">{chartWeeks.map(week=><WeeklyDivergingBarChart key={week.period.key} week={week} scaleMaximum={chartMaximum}/>)}</div></section>
         <section className="analytics-panel" aria-labelledby="source-title"><div className="analytics-section-title"><div><h2 id="source-title">🥧 星星來源分析</h2><p>點擊或觸碰圓環／Top 3 項目，可查看比例與紀錄筆數。</p></div></div><div className="weekly-breakdown-list"><WeeklyBreakdownSection week={report.starAnalysis}/></div></section>
         <section className="analytics-panel" aria-labelledby="redemption-title"><div className="analytics-section-title"><div><h2 id="redemption-title">🎁 兌換統計</h2><p>依兌換當時的名稱與實際消耗快照合併，不受目前獎品價格或刪除影響。</p></div></div><div className="redemption-week-grid is-single"><WeeklyRedemptionTable label={range.label} range={formatWeekRange(period)} items={redemptions}/></div></section>
     </div>;

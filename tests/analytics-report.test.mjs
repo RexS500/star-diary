@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildAnalyticsReport,
   resolveAnalyticsDateRange,
+  splitAnalyticsRangeIntoWeekPeriods,
 } from "../app/analytics-report.ts";
 
 test("analysis ranges resolve to stable calendar boundaries", () => {
@@ -17,6 +18,15 @@ test("analysis ranges resolve to stable calendar boundaries", () => {
   assert.equal(resolveAnalyticsDateRange({ preset: "previous_month", todayKey: "2026-01-10" }).end, "2025-12-31");
   assert.equal(resolveAnalyticsDateRange({ preset: "all", todayKey: "2026-07-19", earliestDate: "2025-03-02" }).start, "2025-03-02");
   assert.equal(resolveAnalyticsDateRange({ preset: "custom", todayKey: "2026-07-19", customStart: "2026-07-20", customEnd: "2026-07-02" }).start, "2026-07-02");
+});
+
+test("default two-week charts stay as two independent seven-day periods", () => {
+  const range = resolveAnalyticsDateRange({ preset: "two_weeks", todayKey: "2026-07-19" });
+  const periods = splitAnalyticsRangeIntoWeekPeriods(range, "2026-07-19");
+  assert.deepEqual(periods.map(period => period.label), ["上週", "本週"]);
+  assert.deepEqual(periods.map(period => period.days.length), [7, 7]);
+  assert.equal(periods[0].end, "2026-07-18");
+  assert.equal(periods[1].start, "2026-07-19");
 });
 
 test("report keeps redemption costs separate and includes zero-value calendar days", () => {

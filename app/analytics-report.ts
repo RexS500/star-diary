@@ -189,6 +189,35 @@ export function analyticsPeriod(range: AnalyticsDateRange): WeekPeriod {
     return { key: range.preset, label: range.label, start: range.start, end: range.end, days: range.days };
 }
 
+export function splitAnalyticsRangeIntoWeekPeriods(range: AnalyticsDateRange, todayKey: string): WeekPeriod[] {
+    if (range.preset === "two_weeks") {
+        const periods = getWeekPeriods(todayKey);
+        return [periods.previous, periods.current];
+    }
+    const groups: string[][] = [];
+    let current: string[] = [];
+    for (const date of range.days) {
+        const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+        if (weekday === 0 && current.length) {
+            groups.push(current);
+            current = [];
+        }
+        current.push(date);
+        if (weekday === 6) {
+            groups.push(current);
+            current = [];
+        }
+    }
+    if (current.length) groups.push(current);
+    return groups.map((days, index) => ({
+        key: `${range.preset}-${index + 1}`,
+        label: groups.length === 1 ? range.label : `第 ${index + 1} 週`,
+        start: days[0],
+        end: days.at(-1)!,
+        days,
+    }));
+}
+
 function redemptionTimestamp(item: AnalyticsRedemptionLike) {
     for (const value of [item.completedAt, item.createdAt, item.updatedAt, item.date]) {
         const timestamp = analyticsTimestamp(value);

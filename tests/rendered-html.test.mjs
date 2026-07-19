@@ -133,12 +133,18 @@ test("range analytics share real child records across both modes and responsive 
   assert.match(home, /上週＋本週/);
   assert.match(home, /最近 30 天/);
   assert.match(home, /刷新並匯出中/);
+  assert.match(home, /splitAnalyticsRangeIntoWeekPeriods/);
+  assert.match(home, /weekly-chart-list/);
+  assert.match(home, /scaleMaximum=\{chartMaximum\}/);
+  assert.doesNotMatch(home, /weekly-chart-scroll/);
   assert.doesNotMatch(home, /tab === "資料分析"\s*&&\s*role === "家長"/);
   assert.match(home, /\["首頁", "任務挑戰", "星星紀錄", "資料分析"/);
   assert.match(logic, /ANALYTICS_WEEKDAY_LABELS = \["日", "一", "二", "三", "四", "五", "六"\]/);
   assert.match(logic, /sourceType === "daily_task"/);
   assert.match(logic, /getWeeklyRedemptionSummary/);
   assert.match(css, /\.weekly-diverging-chart/);
+  assert.match(css, /\.weekly-chart-list/);
+  assert.doesNotMatch(css, /\.weekly-chart-scroll/);
   assert.match(css, /\.donut-chart/);
   assert.match(css, /\.mobile-redemption-cards/);
 });
