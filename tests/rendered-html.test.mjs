@@ -136,6 +136,11 @@ test("range analytics share real child records across both modes and responsive 
   assert.match(home, /splitAnalyticsRangeIntoWeekPeriods/);
   assert.match(home, /weekly-chart-list/);
   assert.match(home, /scaleMaximum=\{chartMaximum\}/);
+  assert.match(home, /weekly-breakdown-list">\{chartWeeks\.map\(week=><WeeklyBreakdownSection/);
+  assert.match(home, /redemption-week-list">\{weeklyRedemptions\.map\(week=><WeeklyRedemptionTable/);
+  assert.match(home, /const weeklyRedemptions=useMemo\(\(\)=>chartPeriods\.map/);
+  assert.doesNotMatch(home, /<WeeklyBreakdownSection week=\{report\.starAnalysis\}/);
+  assert.doesNotMatch(home, /redemption-week-grid is-single/);
   assert.doesNotMatch(home, /weekly-chart-scroll/);
   assert.doesNotMatch(home, /tab === "資料分析"\s*&&\s*role === "家長"/);
   assert.match(home, /\["首頁", "任務挑戰", "星星紀錄", "資料分析"/);
@@ -144,6 +149,7 @@ test("range analytics share real child records across both modes and responsive 
   assert.match(logic, /getWeeklyRedemptionSummary/);
   assert.match(css, /\.weekly-diverging-chart/);
   assert.match(css, /\.weekly-chart-list/);
+  assert.match(css, /\.weekly-breakdown-list,\.redemption-week-list/);
   assert.doesNotMatch(css, /\.weekly-chart-scroll/);
   assert.match(css, /\.donut-chart/);
   assert.match(css, /\.mobile-redemption-cards/);

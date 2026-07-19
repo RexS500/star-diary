@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { buildAnalyticsWorkbook } from "./excel-export";
 import {
-    analyticsPeriod,
     buildAnalyticsReport,
     earliestAnalyticsDate,
     resolveAnalyticsDateRange,
@@ -37,7 +36,6 @@ import { TIME_SLOT_META, type OfficialTaskTimeSlot } from "./official-task-libra
 import { changeTemplateType, moveTemplateWithinType, normalizeTemplateSortOrders, orderedTemplatesByType, type QuickTemplateType } from "./quick-template-logic";
 import { EVERY_DAY, WEEKDAYS, WEEKDAY_OPTIONS, WEEKEND, normalizeWeekdays, weekdayPreset } from "./weekday-selection";
 import {
-    formatRedemptionTime,
     formatWeekRange,
     getWeeklyRedemptionSummary,
     getWeeklyStarAnalytics,
@@ -578,21 +576,24 @@ function WeeklyBreakdownSection({week}:{week:WeeklyStarAnalytics}){
     return <section className="weekly-breakdown-group"><div className="weekly-breakdown-heading"><h3>{week.period.label}</h3><span>{formatWeekRange(week.period)}</span></div><div className="donut-card-grid"><DonutBreakdownCard week={week} type="star"/><DonutBreakdownCard week={week} type="deduct"/></div></section>;
 }
 
-const redemptionSortLabels:Record<RedemptionSortKey,string>={name:"品名",quantity:"兌換數量",totalCost:"消耗星星",latestAt:"最近兌換時間"};
-const defaultRedemptionDirection=(key:RedemptionSortKey):SortDirection=>key==="name"?"asc":"desc";
+type RedemptionDisplaySortKey=Exclude<RedemptionSortKey,"latestAt">;
+const redemptionSortLabels:Record<RedemptionDisplaySortKey,string>={name:"商品",quantity:"次數",totalCost:"消耗星星"};
+const redemptionSortKeys=Object.keys(redemptionSortLabels) as RedemptionDisplaySortKey[];
+const defaultRedemptionDirection=(key:RedemptionDisplaySortKey):SortDirection=>key==="name"?"asc":"desc";
 
 function WeeklyRedemptionTable({label,range,items}:{label:string;range:string;items:ReturnType<typeof getWeeklyRedemptionSummary>}){
-    const [sort,setSort]=useState<{key:RedemptionSortKey;direction:SortDirection}>({key:"totalCost",direction:"desc"});
+    const [sort,setSort]=useState<{key:RedemptionDisplaySortKey;direction:SortDirection}>({key:"totalCost",direction:"desc"});
     const sorted=useMemo(()=>sortRedemptionSummary(items,sort.key,sort.direction),[items,sort]);
-    function changeSort(key:RedemptionSortKey){setSort(current=>current.key===key?{key,direction:current.direction==="asc"?"desc":"asc"}:{key,direction:defaultRedemptionDirection(key)})}
-    const arrow=(key:RedemptionSortKey)=>sort.key===key?(sort.direction==="asc"?" ↑":" ↓"):"";
-    const ariaSort=(key:RedemptionSortKey)=>sort.key===key?(sort.direction==="asc"?"ascending":"descending"):"none";
+    function changeSort(key:RedemptionDisplaySortKey){setSort(current=>current.key===key?{key,direction:current.direction==="asc"?"desc":"asc"}:{key,direction:defaultRedemptionDirection(key)})}
+    const arrow=(key:RedemptionDisplaySortKey)=>sort.key===key?(sort.direction==="asc"?" ↑":" ↓"):"";
+    const ariaSort=(key:RedemptionDisplaySortKey)=>sort.key===key?(sort.direction==="asc"?"ascending":"descending"):"none";
     return <article className="redemption-week-card">
-        <div className="redemption-week-head"><div><h3>{label}兌換</h3><p>{range}</p></div><strong>{items.reduce((sum,item)=>sum+item.totalCost,0)} ⭐</strong></div>
+        <div className="redemption-week-head"><div><h3>{label}</h3><p>{range}</p></div><strong>共消耗 {items.reduce((sum,item)=>sum+item.totalCost,0)} 顆星</strong></div>
         {!items.length?<p className="analytics-inline-empty">{label}沒有已完成的兌換紀錄</p>:<>
-            <div className="mobile-redemption-sort"><label>排序<select value={sort.key} onChange={event=>{const key=event.target.value as RedemptionSortKey;setSort({key,direction:defaultRedemptionDirection(key)})}}>{Object.entries(redemptionSortLabels).map(([key,text])=><option key={key} value={key}>{text}</option>)}</select></label><button type="button" onClick={()=>setSort(current=>({...current,direction:current.direction==="asc"?"desc":"asc"}))}>{sort.direction==="asc"?"升冪 ↑":"降冪 ↓"}</button></div>
-            <div className="redemption-table-wrap"><table className="redemption-table"><thead><tr>{(Object.keys(redemptionSortLabels) as RedemptionSortKey[]).map(key=><th key={key} aria-sort={ariaSort(key)}><button type="button" onClick={()=>changeSort(key)}>{redemptionSortLabels[key]}{arrow(key)}</button></th>)}</tr></thead><tbody>{sorted.map(item=><tr key={item.key}><td>{item.name}</td><td>{item.quantity}</td><td><strong>{item.totalCost} ⭐</strong></td><td>{formatRedemptionTime(item.latestAt)}</td></tr>)}</tbody></table></div>
-            <div className="mobile-redemption-cards">{sorted.map(item=><article key={item.key}><div><strong>{item.name}</strong><small>最近兌換：{formatRedemptionTime(item.latestAt)}</small></div><dl><div><dt>數量</dt><dd>{item.quantity}</dd></div><div><dt>消耗星星</dt><dd>{item.totalCost} ⭐</dd></div></dl></article>)}</div>
+            <h4 className="redemption-ranking-title">兌換排行榜</h4>
+            <div className="mobile-redemption-sort"><label>排序<select value={sort.key} onChange={event=>{const key=event.target.value as RedemptionDisplaySortKey;setSort({key,direction:defaultRedemptionDirection(key)})}}>{redemptionSortKeys.map(key=><option key={key} value={key}>{redemptionSortLabels[key]}</option>)}</select></label><button type="button" onClick={()=>setSort(current=>({...current,direction:current.direction==="asc"?"desc":"asc"}))}>{sort.direction==="asc"?"升冪 ↑":"降冪 ↓"}</button></div>
+            <div className="redemption-table-wrap"><table className="redemption-table"><thead><tr>{redemptionSortKeys.map(key=><th key={key} aria-sort={ariaSort(key)}><button type="button" onClick={()=>changeSort(key)}>{redemptionSortLabels[key]}{arrow(key)}</button></th>)}</tr></thead><tbody>{sorted.map(item=><tr key={item.key}><td>{item.name}</td><td>{item.quantity}</td><td><strong>{item.totalCost} ⭐</strong></td></tr>)}</tbody></table></div>
+            <div className="mobile-redemption-cards">{sorted.map(item=><article key={item.key}><strong>{item.name}</strong><dl><div><dt>次數</dt><dd>{item.quantity}</dd></div><div><dt>消耗星星</dt><dd>{item.totalCost} ⭐</dd></div></dl></article>)}</div>
         </>}
     </article>;
 }
@@ -607,8 +608,8 @@ function Analytics({data,child,onRefresh,todayKey}:{data:State;child:Child;onRef
     const chartPeriods=useMemo(()=>splitAnalyticsRangeIntoWeekPeriods(range,todayKey),[range,todayKey]);
     const chartWeeks=useMemo(()=>chartPeriods.map(item=>getWeeklyStarAnalytics(data.entries,child.id,item,todayKey)),[chartPeriods,data.entries,child.id,todayKey]);
     const chartMaximum=Math.max(1,...chartWeeks.flatMap(week=>week.days.flatMap(day=>[day.starTotal,day.deductTotal])));
-    const summaryCosts=useMemo(()=>chartPeriods.map(item=>getWeeklyRedemptionSummary(data.redemptions,child.id,item).reduce((sum,row)=>sum+row.totalCost,0)),[chartPeriods,data.redemptions,child.id]);
-    const period=analyticsPeriod(range),redemptions=useMemo(()=>getWeeklyRedemptionSummary(data.redemptions,child.id,analyticsPeriod(range)),[data.redemptions,child.id,range]);
+    const weeklyRedemptions=useMemo(()=>chartPeriods.map(period=>({period,items:getWeeklyRedemptionSummary(data.redemptions,child.id,period)})),[chartPeriods,data.redemptions,child.id]);
+    const summaryCosts=useMemo(()=>weeklyRedemptions.map(week=>week.items.reduce((sum,row)=>sum+row.totalCost,0)),[weeklyRedemptions]);
     const hasAnyData=report.starAnalysis.recordCount+report.starDetails.filter(item=>item.type==="特殊獎勵").length+report.taskRows.length+report.redemptionRows.length>0;
     const updateTime=()=>setLastUpdated(new Date().toLocaleTimeString("zh-TW",{timeZone:"Asia/Taipei",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}));
     async function refresh(){setRefreshing(true);try{if(await onRefresh())updateTime()}finally{setRefreshing(false)}}
@@ -628,8 +629,8 @@ function Analytics({data,child,onRefresh,todayKey}:{data:State;child:Child;onRef
         {!hasAnyData&&<section className="analytics-no-data"><span>📊</span><h2>這個日期範圍尚無紀錄</h2><p>每日統計與 Excel 仍會保留每一天並顯示 0，或可切換其他日期範圍。</p></section>}
         <section aria-labelledby="weekly-summary-title"><div className="analytics-section-title"><div><h2 id="weekly-summary-title">日期範圍摘要</h2><p>兌換是消費紀錄，不會算成扣星。</p></div></div><div className={`weekly-summary-grid ${chartWeeks.length===1?"is-single":"is-stacked"}`}>{chartWeeks.map((week,index)=><WeeklySummaryCard key={week.period.key} week={week} redemptionCost={summaryCosts[index]??0}/>)}</div></section>
         <section className="analytics-panel" aria-labelledby="weekly-chart-title"><div className="analytics-section-title"><div><h2 id="weekly-chart-title">📊 每日星星變化</h2><p>每週各自固定在完整寬度中；加星在 0 軸上方，扣星在下方，同項目跨週維持相同顏色。</p></div></div><div className="weekly-chart-list">{chartWeeks.map(week=><WeeklyDivergingBarChart key={week.period.key} week={week} scaleMaximum={chartMaximum}/>)}</div></section>
-        <section className="analytics-panel" aria-labelledby="source-title"><div className="analytics-section-title"><div><h2 id="source-title">🥧 星星來源分析</h2><p>點擊或觸碰圓環／Top 3 項目，可查看比例與紀錄筆數。</p></div></div><div className="weekly-breakdown-list"><WeeklyBreakdownSection week={report.starAnalysis}/></div></section>
-        <section className="analytics-panel" aria-labelledby="redemption-title"><div className="analytics-section-title"><div><h2 id="redemption-title">🎁 兌換統計</h2><p>依兌換當時的名稱與實際消耗快照合併，不受目前獎品價格或刪除影響。</p></div></div><div className="redemption-week-grid is-single"><WeeklyRedemptionTable label={range.label} range={formatWeekRange(period)} items={redemptions}/></div></section>
+        <section className="analytics-panel" aria-labelledby="source-title"><div className="analytics-section-title"><div><h2 id="source-title">🥧 星星來源分析</h2><p>上週與本週各自統計總數、來源與 Top 3；點擊或觸碰項目可查看比例與紀錄筆數。</p></div></div><div className="weekly-breakdown-list">{chartWeeks.map(week=><WeeklyBreakdownSection key={week.period.key} week={week}/>)}</div></section>
+        <section className="analytics-panel" aria-labelledby="redemption-title"><div className="analytics-section-title"><div><h2 id="redemption-title">🎁 兌換統計</h2><p>上週與本週各自排序；兌換依當時的名稱與實際消耗快照合併，不受目前獎品價格或刪除影響。</p></div></div><div className="redemption-week-list">{weeklyRedemptions.map(week=><WeeklyRedemptionTable key={week.period.key} label={week.period.label} range={formatWeekRange(week.period)} items={week.items}/>)}</div></section>
     </div>;
 }
 export default function App() {
