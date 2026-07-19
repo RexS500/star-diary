@@ -37,8 +37,8 @@ export type AnalyticsRedemptionLike = {
 };
 
 export type WeekPeriod = {
-    key: "previous" | "current";
-    label: "上週" | "本週";
+    key: string;
+    label: string;
     start: string;
     end: string;
     days: string[];
@@ -192,7 +192,7 @@ export function getWeeklyStarAnalytics(entries: AnalyticsEntryLike[], childId: s
     }
 
     const totals = { star: new Map<string, StarCategory>(), deduct: new Map<string, StarCategory>() };
-    const days = period.days.map((date, index): DailyStarAnalytics => {
+    const days = period.days.map((date): DailyStarAnalytics => {
         const maps = dailyMaps.get(date)!;
         for (const type of ["star", "deduct"] as const) {
             for (const item of maps[type].values()) {
@@ -206,7 +206,7 @@ export function getWeeklyStarAnalytics(entries: AnalyticsEntryLike[], childId: s
         const deductItems = [...maps.deduct.values()].sort(categorySort);
         return {
             date,
-            weekday: ANALYTICS_WEEKDAY_LABELS[index],
+            weekday: ANALYTICS_WEEKDAY_LABELS[new Date(`${date}T00:00:00Z`).getUTCDay()],
             isFuture: date > todayKey,
             starTotal: starItems.reduce((sum, item) => sum + item.amount, 0),
             deductTotal: deductItems.reduce((sum, item) => sum + item.amount, 0),

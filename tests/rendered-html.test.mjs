@@ -120,16 +120,19 @@ test("record modal keeps one mounted scroll container while the iPhone keyboard 
   assert.match(css, /\.record-modal[^}]*safe-area-inset-bottom/);
 });
 
-test("weekly analytics share real child records across both modes and responsive charts", async () => {
+test("range analytics share real child records across both modes and responsive charts", async () => {
   const [home, logic, css] = await Promise.all([
     readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/analytics-logic.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
-  assert.match(home, /每週星星變化/);
+  assert.match(home, /每日星星變化/);
   assert.match(home, /星星來源分析/);
   assert.match(home, /兌換統計/);
-  assert.match(home, /<Analytics entries=\{data\.entries\} redemptions=\{data\.redemptions\}/);
+  assert.match(home, /<Analytics data=\{data\} child=\{child\}/);
+  assert.match(home, /上週＋本週/);
+  assert.match(home, /最近 30 天/);
+  assert.match(home, /刷新並匯出中/);
   assert.doesNotMatch(home, /tab === "資料分析"\s*&&\s*role === "家長"/);
   assert.match(home, /\["首頁", "任務挑戰", "星星紀錄", "資料分析"/);
   assert.match(logic, /ANALYTICS_WEEKDAY_LABELS = \["日", "一", "二", "三", "四", "五", "六"\]/);
