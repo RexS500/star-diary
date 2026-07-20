@@ -22,13 +22,14 @@ import {
     verifySecret,
 } from "../../security-logic";
 import { calculateChildStarBalance, reconcileChildStarBalances } from "../../star-balance";
+import { FamilyAccessError, familyAccessErrorResponse, requireFamilyMembership } from "../../family-access";
 
 const initial = {
-    children: [{ id: "c1", name: "小宇", gender: "boy", avatar: "boy", stars: 0 }],
+    children: [],
     entries: [],
-    rewards: [{ id: "r1", icon: "🍦", name: "冰淇淋", cost: 12, stock: 0 }, { id: "r2", icon: "🎮", name: "遊戲 30 分鐘", cost: 20, stock: 0 }],
+    rewards: [],
     specialRewards: [],
-    templates: [{ id: "t1", title: "主動整理書包", amount: 3, type: "star", sortOrder: 0 }, { id: "t2", title: "幫忙做家事", amount: 2, type: "star", sortOrder: 1 }],
+    templates: [],
     redemptions: [],
     rewardIconLibrary: [],
     dailyTasks: [],
@@ -168,7 +169,7 @@ function normalizeDailyTaskRecords(value: unknown, _childIds: Set<string>) {
 
 function normalizeState(value: unknown): StoredState {
     const state = asRecord(value);
-    state.children = Array.isArray(state.children) && state.children.length ? state.children : initial.children;
+    state.children = Array.isArray(state.children) ? state.children : initial.children;
     state.entries = Array.isArray(state.entries) ? state.entries : [];
     state.templates = normalizeTemplates(state.templates);
     state.redemptions = Array.isArray(state.redemptions) ? state.redemptions : [];
@@ -264,40 +265,35 @@ function reconcileTodayPendingRecords(state: StoredState) {
     });
 }
 
-async function ensureTable() {
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_state (id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL)").run();
-}
-
-async function setup(): Promise<{ state: StoredState; revision: number }> {
-    await ensureTable();
+async function setup(familyId: string): Promise<{ state: StoredState; revision: number }> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
-        let row = await env.DB.prepare("SELECT data, updated_at FROM app_state WHERE id = ?").bind("family").first<StateRow>();
+        let row = await env.DB.prepare("SELECT data, updated_at FROM family_state WHERE family_id = ?").bind(familyId).first<StateRow>();
         if (!row) {
             const state = materializeDailyTaskRecords(normalizeState(initial)), revision = Date.now();
-            await env.DB.prepare("INSERT OR IGNORE INTO app_state (id,data,updated_at) VALUES (?,?,?)").bind("family", JSON.stringify(state), revision).run();
-            row = await env.DB.prepare("SELECT data, updated_at FROM app_state WHERE id = ?").bind("family").first<StateRow>();
+            await env.DB.prepare("INSERT OR IGNORE INTO family_state (family_id,data,updated_at) VALUES (?,?,?)").bind(familyId, JSON.stringify(state), revision).run();
+            row = await env.DB.prepare("SELECT data, updated_at FROM family_state WHERE family_id = ?").bind(familyId).first<StateRow>();
             if (!row) continue;
         }
         const state = materializeDailyTaskRecords(normalizeState(JSON.parse(row.data))), serialized = JSON.stringify(state);
         if (serialized === row.data) return { state, revision: Number(row.updated_at) };
-        const revision = Math.max(Date.now(), Number(row.updated_at) + 1), result = await env.DB.prepare("UPDATE app_state SET data=?,updated_at=? WHERE id=? AND updated_at=?").bind(serialized, revision, "family", row.updated_at).run();
+        const revision = Math.max(Date.now(), Number(row.updated_at) + 1), result = await env.DB.prepare("UPDATE family_state SET data=?,updated_at=? WHERE family_id=? AND updated_at=?").bind(serialized, revision, familyId, row.updated_at).run();
         if (Number(result.meta.changes || 0) === 1) return { state, revision };
     }
     throw new ApiError("資料正在被其他裝置更新，請稍後再試", 409);
 }
 
-async function writeState(state: StoredState, previousRevision: number) {
+async function writeState(state: StoredState, previousRevision: number, familyId: string) {
     const normalized = materializeDailyTaskRecords(normalizeState(state)), revision = Math.max(Date.now(), previousRevision + 1);
-    const result = await env.DB.prepare("UPDATE app_state SET data=?,updated_at=? WHERE id=? AND updated_at=?").bind(JSON.stringify(normalized), revision, "family", previousRevision).run();
+    const result = await env.DB.prepare("UPDATE family_state SET data=?,updated_at=? WHERE family_id=? AND updated_at=?").bind(JSON.stringify(normalized), revision, familyId, previousRevision).run();
     if (Number(result.meta.changes || 0) !== 1) throw new ApiError("資料已被其他裝置更新，請重新整理後再操作", 409);
     return { state: normalized, revision };
 }
 
-async function mutateState(mutator: (state: StoredState) => Promise<boolean | void> | boolean | void) {
+async function mutateState(familyId: string, mutator: (state: StoredState) => Promise<boolean | void> | boolean | void) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        const current = await setup(), changed = await mutator(current.state);
-        if (changed === false) return setup();
-        try { return await writeState(current.state, current.revision); }
+        const current = await setup(familyId), changed = await mutator(current.state);
+        if (changed === false) return setup(familyId);
+        try { return await writeState(current.state, current.revision, familyId); }
         catch (error) { if (!(error instanceof ApiError) || error.status !== 409 || attempt === 2) throw error; }
     }
     throw new ApiError("資料正在被其他裝置更新，請稍後再試", 409);
@@ -382,15 +378,18 @@ function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "
 
 export async function GET() {
     try {
-        const { state, revision } = await setup();
+        const { familyId } = await requireFamilyMembership("read");
+        const { state, revision } = await setup(familyId);
         return Response.json(safePayload(state, revision), { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } });
     } catch (error) {
+        if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);
         return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof ApiError ? error.status : 500, headers: { "Cache-Control": "no-store" } });
     }
 }
 
 export async function POST(req: Request) {
     try {
+        const { familyId } = await requireFamilyMembership("write");
         const body = await req.json() as {
             action: string;
             password?: string;
@@ -414,7 +413,7 @@ export async function POST(req: Request) {
         if (body.action === "set_parent_password") {
             const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "");
             if (passwordError) throw new ApiError(passwordError, 400);
-            const result = await mutateState(async state => {
+            const result = await mutateState(familyId, async state => {
                 if (state.passwordHash) throw new ApiError("家長密碼已設定，請使用修改密碼功能", 409);
                 state.passwordHash = await hashSecret(body.newPassword || "");
                 state.securityQuestionType = "";
@@ -432,7 +431,7 @@ export async function POST(req: Request) {
         if (body.action === "change_parent_password") {
             const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "", body.currentPassword || "");
             if (passwordError) throw new ApiError(passwordError, 400);
-            const result = await mutateState(async state => {
+            const result = await mutateState(familyId, async state => {
                 if (!state.passwordHash) throw new ApiError("尚未設定家長密碼", 409);
                 await requireOriginalParentPassword(state, body.currentPassword || "");
                 state.passwordHash = await hashSecret(body.newPassword || "");
@@ -447,7 +446,7 @@ export async function POST(req: Request) {
             if (securityError) throw new ApiError(securityError, 400);
             const securityQuestionText = body.securityQuestionText?.trim();
             if (!securityQuestionText) throw new ApiError("請選擇安全提示問題", 400);
-            const result = await mutateState(async state => {
+            const result = await mutateState(familyId, async state => {
                 if (!state.passwordHash) throw new ApiError("請先設定家長密碼", 409);
                 await requireOriginalParentPassword(state, body.currentPassword || "");
                 state.securityQuestionType = body.securityQuestionType || "";
@@ -464,7 +463,7 @@ export async function POST(req: Request) {
 
         if (body.action === "verify_security_answer") {
             let recoveryToken = "", answerCorrect = false, lockedAfterFailure = false;
-            const result = await mutateState(async state => {
+            const result = await mutateState(familyId, async state => {
                 if (!state.passwordHash || !state.securityAnswerHash || !state.securityQuestionText) throw new ApiError("目前尚未設定安全提示問題，無法使用此方式重設密碼。", 409);
                 const lock = securityLockStatus(state.securityFailedAttempts, state.securityLockedUntil);
                 if (lock.locked) throw new ApiError("嘗試次數過多，請稍後再試", 429);
@@ -491,7 +490,7 @@ export async function POST(req: Request) {
         if (body.action === "reset_parent_password") {
             const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "");
             if (passwordError) throw new ApiError(passwordError, 400);
-            const result = await mutateState(async state => {
+            const result = await mutateState(familyId, async state => {
                 if (!state.securityResetTokenHash || !validIso(state.securityResetTokenExpiresAt) || Date.parse(state.securityResetTokenExpiresAt) <= Date.now()) throw new ApiError("重設連結已失效，請重新驗證安全問題", 403);
                 if (!body.recoveryToken || await sha256Hex(body.recoveryToken) !== state.securityResetTokenHash) throw new ApiError("重設驗證失效，請重新驗證安全問題", 403);
                 if (state.passwordHash && await verifySecret(body.newPassword || "", state.passwordHash)) throw new ApiError("新密碼不可與原始密碼相同", 400);
@@ -510,7 +509,7 @@ export async function POST(req: Request) {
             const type = submitted.type === "deduct" || submitted.type === "special" ? submitted.type : submitted.type === "star" ? "star" : null;
             if (!type || typeof submitted.childId !== "string" || typeof submitted.title !== "string" || !submitted.title.trim()) throw new ApiError("紀錄內容不完整", 400);
             const nowIso = new Date().toISOString(), record = { id: typeof submitted.id === "string" && submitted.id ? submitted.id : crypto.randomUUID(), childId: submitted.childId, title: submitted.title.trim(), amount: positiveInt(submitted.amount), type, date: new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), occurredAt: nowIso, createdAt: nowIso, status: "pending" };
-            const result = await mutateState(state => {
+            const result = await mutateState(familyId, state => {
                 if (!state.children.some(child => child.id === record.childId)) throw new ApiError("找不到孩子資料", 404);
                 if (state.entries.some(entry => entry.id === record.id)) return false;
                 state.entries = [record, ...state.entries];
@@ -521,7 +520,7 @@ export async function POST(req: Request) {
         if (body.action === "child_redemption") {
             const record = body.record;
             if (!record || record.status !== "pending") throw new ApiError("不正確的兌換申請", 400);
-            const result = await mutateState(state => {
+            const result = await mutateState(familyId, state => {
                 if (!state.children.some(child => child.id === record.childId)) throw new ApiError("找不到孩子資料", 404);
                 if (state.redemptions.some((item: JsonRecord) => item.id === record.id)) return false;
                 state.redemptions = [record, ...state.redemptions];
@@ -530,7 +529,7 @@ export async function POST(req: Request) {
         }
 
         if (body.action === "child_daily_task_complete") {
-            const result = await mutateState(state => {
+            const result = await mutateState(familyId, state => {
                 const today = taipeiDateKey(), record = state.dailyTaskRecords.find(item => item.id === body.recordId && item.childId === body.childId && item.date === today);
                 if (!record) throw new ApiError("找不到今天的任務，請刷新後再試", 404);
                 if (record.status === "completed" || record.status === "pending_approval") return false;
@@ -551,7 +550,7 @@ export async function POST(req: Request) {
         }
 
         if (body.action === "parent_daily_task_action") {
-            const result = await mutateState(async state => {
+            const result = await mutateState(familyId, async state => {
                 await requireParent(state, body.password || "");
                 const record = state.dailyTaskRecords.find(item => item.id === body.recordId);
                 if (!record) throw new ApiError("找不到任務紀錄，請刷新後再試", 404);
@@ -596,7 +595,7 @@ export async function POST(req: Request) {
             return Response.json(safePayload(result.state, result.revision));
         }
 
-        const current = await setup();
+        const current = await setup(familyId);
         await requireParent(current.state, body.password || "");
         if (body.action === "verify") return Response.json({ ok: true, revision: current.revision });
         if (body.action !== "save" || !body.state) throw new ApiError("不正確的儲存內容", 400);
@@ -642,9 +641,10 @@ export async function POST(req: Request) {
         });
         next.dailyTasks = prepareTaskDefinitionsForSave(current.state.dailyTasks, next.dailyTasks);
         reconcileTodayPendingRecords(next);
-        const saved = await writeState(next, current.revision);
+        const saved = await writeState(next, current.revision, familyId);
         return Response.json(safePayload(saved.state, saved.revision));
     } catch (error) {
+        if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);
         return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof ApiError ? error.status : 500 });
     }
 }

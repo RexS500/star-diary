@@ -1,0 +1,5 @@
+# Local Auth.js / Google OAuth configuration. Never commit .dev.vars itself.
+AUTH_SECRET=replace-with-a-long-random-secret
+AUTH_GOOGLE_ID=replace-with-google-oauth-client-id
+AUTH_GOOGLE_SECRET=replace-with-google-oauth-client-secret
+INITIAL_OWNER_EMAIL=replace-with-the-google-email-that-owns-existing-data

@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { signOut } from "next-auth/react";
 import { buildAnalyticsWorkbook } from "./excel-export";
 import {
     buildAnalyticsReport,
@@ -155,6 +156,20 @@ type SecurityInfo = {
     hint: string;
     lockedUntil?: string;
 };
+type SignedInAccount = {
+    id: string;
+    email: string;
+    name: string | null;
+    image: string | null;
+    role: "owner" | "parent" | "viewer";
+};
+const SESSION_EXPIRED_EVENT = "star-diary:session-expired";
+
+async function authenticatedFetch(input:RequestInfo|URL,init?:RequestInit){
+    const response=await fetch(input,init);
+    if(response.status===401&&typeof window!=="undefined")window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    return response;
+}
 
 function applyEditableSettings(base:State,settings:State):State{
     const starsByChild=new Map(base.children.map(child=>[child.id,child.stars]));
@@ -179,7 +194,8 @@ function prepareSettingsForSave(draft:State):State{
         dailyTaskSettings:Object.fromEntries(Object.entries(draft.dailyTaskSettings).filter(([childId])=>childIds.has(childId))),
     };
 }
-const fallback: State = { children: [{ id: "c1", name: "小宇", gender: "boy", avatar: "boy", stars: 0 }], entries: [], rewards: [{ id: "r1", icon: "🍦", name: "冰淇淋", cost: 12, stock: 0 }], templates: [{ id: "t1", title: "主動整理書包", amount: 3, type: "star", sortOrder: 0 }], redemptions: [],specialRewards:[],rewardIconLibrary:[],dailyTasks:[],dailyTaskRecords:[],dailyTaskSettings:{},favoriteOfficialTaskIds:[],dailyTaskSortMode:"flow" };
+const fallback: State = { children: [], entries: [], rewards: [], templates: [], redemptions: [],specialRewards:[],rewardIconLibrary:[],dailyTasks:[],dailyTaskRecords:[],dailyTaskSettings:{},favoriteOfficialTaskIds:[],dailyTaskSortMode:"flow" };
+const emptyChild:Child={id:"",name:"孩子",gender:"boy",avatar:"boy",stars:0};
 const BUILTIN_REWARD_ICONS=[
     {value:"🎁",name:"禮物"},{value:"🍦",name:"冰淇淋"},{value:"🍭",name:"糖果"},{value:"🍔",name:"漢堡"},{value:"🍕",name:"披薩"},{value:"🧋",name:"飲料"},{value:"🎮",name:"遊戲"},{value:"📱",name:"手機／3C"},{value:"🎬",name:"電影"},{value:"📷",name:"相機"},{value:"🧸",name:"玩具"},{value:"⚽",name:"運動"},{value:"🏊",name:"游泳"},{value:"🚲",name:"腳踏車"},{value:"🎡",name:"遊樂園"},{value:"✈️",name:"旅行"},{value:"📚",name:"書籍"},{value:"⭐",name:"星星"},{value:"❤️",name:"愛心"},{value:"💰",name:"零用錢"}
 ];
@@ -384,7 +400,7 @@ function ParentSecuritySettings({passwordSet,security,onPayload,onMessage}:{pass
     const [currentPassword,setCurrentPassword]=useState(""),[securityCurrentPassword,setSecurityCurrentPassword]=useState(""),[newPassword,setNewPassword]=useState(""),[confirmPassword,setConfirmPassword]=useState(""),[questionType,setQuestionType]=useState(defaultQuestion),[customQuestion,setCustomQuestion]=useState(security.questionType==="custom"?security.questionText:""),[answer,setAnswer]=useState(""),[confirmAnswer,setConfirmAnswer]=useState(""),[hint,setHint]=useState(security.hint||""),[busy,setBusy]=useState(false),[passwordError,setPasswordError]=useState(""),[securityError,setSecurityError]=useState(""),[editingSecurity,setEditingSecurity]=useState(!security.configured);
     const questionText=questionType==="custom"?customQuestion:(SECURITY_QUESTIONS.find(question=>question.value===questionType)?.label||"");
     async function post(body:Record<string,unknown>){
-        const response=await fetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),result=await response.json();
+        const response=await authenticatedFetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),result=await response.json();
         if(!response.ok)throw new Error(result.error||"更新失敗");
         return result;
     }
@@ -458,7 +474,7 @@ function ParentSecuritySettings({passwordSet,security,onPayload,onMessage}:{pass
 function ForgotPasswordModal({security,onClose,onPayload,onMessage}:{security:SecurityInfo;onClose:()=>void;onPayload:(payload:{state?:Partial<State>;revision?:number;passwordSet?:boolean;security?:SecurityInfo},newPassword:string)=>void;onMessage:(message:string)=>void}){
     const [stage,setStage]=useState<"answer"|"reset">("answer"),[answer,setAnswer]=useState(""),[newPassword,setNewPassword]=useState(""),[confirmPassword,setConfirmPassword]=useState(""),[token,setToken]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
     async function request(body:Record<string,unknown>){
-        const response=await fetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),result=await response.json();
+        const response=await authenticatedFetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),result=await response.json();
         if(!response.ok)throw new Error(result.error||"驗證失敗");
         return result;
     }
@@ -602,6 +618,18 @@ function WeeklyRedemptionTable({label,range,items}:{label:string;range:string;it
     </article>;
 }
 
+function EmptyFamilyOnboarding({account,onCreate}:{account:SignedInAccount;onCreate:(name:string)=>Promise<boolean>}){
+    const [name,setName]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+    async function submit(){const clean=name.trim();if(!clean){setError("請輸入孩子姓名");return}setBusy(true);setError("");try{if(!await onCreate(clean))setError("建立失敗，請檢查網路後再試")}finally{setBusy(false)}}
+    return <main className="family-onboarding-page"><header className="onboarding-account-bar"><div>{account.image&&<img src={account.image} alt="" referrerPolicy="no-referrer"/>}<span><strong>{account.name||"Google 使用者"}</strong><small>{account.email}</small></span></div><button type="button" onClick={()=>void signOut({callbackUrl:"/"})}>登出</button></header><section className="family-onboarding-card"><img src="/star-diary-logo.jpg" alt="" width={92} height={92}/><p className="eyebrow">WELCOME TO STAR DIARY</p><h1>建立你的家庭日記</h1><p>這是全新的空白家庭。先加入第一位孩子，之後即可設定任務、星星與獎品。</p><label>孩子姓名<input value={name} maxLength={40} autoFocus autoComplete="off" placeholder="例如：Vanessa" onChange={event=>{setName(event.target.value);setError("")}} onKeyDown={event=>{if(event.key==="Enter")void submit()}}/></label>{error&&<p className="account-login-error" role="alert">{error}</p>}<button type="button" className="primary" disabled={busy} onClick={()=>void submit()}>{busy?"建立中…":"開始使用星星日記"}</button></section></main>;
+}
+
+function FamilyLoadError({account,onRetry}:{account:SignedInAccount;onRetry:()=>Promise<boolean>}){
+    const [busy,setBusy]=useState(false);
+    async function retry(){setBusy(true);try{await onRetry()}finally{setBusy(false)}}
+    return <main className="family-onboarding-page"><header className="onboarding-account-bar"><div>{account.image&&<img src={account.image} alt="" referrerPolicy="no-referrer"/>}<span><strong>{account.name||"Google 使用者"}</strong><small>{account.email}</small></span></div><button type="button" onClick={()=>void signOut({callbackUrl:"/"})}>登出</button></header><section className="family-onboarding-card"><img src="/star-diary-logo.jpg" alt="" width={92} height={92}/><h1>暫時無法讀取家庭資料</h1><p>你的登入仍然有效，但目前無法連上資料庫。請檢查網路後重試；我們不會用空白資料覆蓋原有家庭。</p><button type="button" className="primary" disabled={busy} onClick={()=>void retry()}>{busy?"重新連線中…":"重新讀取資料"}</button></section></main>;
+}
+
 function Analytics({data,child,onRefresh,todayKey}:{data:State;child:Child;onRefresh:()=>Promise<State|null>;todayKey:string}){
     const defaultRange=useMemo(()=>resolveAnalyticsDateRange({preset:"two_weeks",todayKey}),[todayKey]);
     const [preset,setPreset]=useState<AnalyticsRangePreset>("two_weeks"),[customStart,setCustomStart]=useState(defaultRange.start),[customEnd,setCustomEnd]=useState(defaultRange.end);
@@ -637,8 +665,8 @@ function Analytics({data,child,onRefresh,todayKey}:{data:State;child:Child;onRef
         <section className="analytics-panel" aria-labelledby="redemption-title"><div className="analytics-section-title"><div><h2 id="redemption-title">🎁 兌換統計</h2><p>上週與本週各自排序；兌換依當時的名稱與實際消耗快照合併，不受目前獎品價格或刪除影響。</p></div></div><div className="redemption-week-list">{weeklyRedemptions.map(week=><WeeklyRedemptionTable key={week.period.key} label={week.period.label} range={formatWeekRange(week.period)} items={week.items}/>)}</div></section>
     </div>;
 }
-export default function App() {
-    const [data, setData] = useState(fallback), [cid, setCid] = useState("c1"), [tab, setTab] = useState("首頁"), [role, setRole] = useState("孩子"), [password, setPassword] = useState(""), [passwordSet, setPasswordSet] = useState(false), [securityInfo,setSecurityInfo]=useState<SecurityInfo>({configured:false,questionType:"",questionText:"",hint:""}), [login, setLogin] = useState(false), [forgotPassword,setForgotPassword]=useState(false), [record, setRecord] = useState(false), [redeem, setRedeem] = useState<Reward | null>(null), [quickConfirm, setQuickConfirm] = useState<Template | null>(null), [toast, setToast] = useState(""), [loading, setLoading] = useState(true);
+export default function App({account}:{account:SignedInAccount}) {
+    const [data, setData] = useState(fallback), [cid, setCid] = useState(""), [tab, setTab] = useState("首頁"), [role, setRole] = useState("孩子"), [password, setPassword] = useState(""), [passwordSet, setPasswordSet] = useState(false), [securityInfo,setSecurityInfo]=useState<SecurityInfo>({configured:false,questionType:"",questionText:"",hint:""}), [login, setLogin] = useState(false), [forgotPassword,setForgotPassword]=useState(false), [record, setRecord] = useState(false), [redeem, setRedeem] = useState<Reward | null>(null), [quickConfirm, setQuickConfirm] = useState<Template | null>(null), [toast, setToast] = useState(""), [loading, setLoading] = useState(true),[loadFailed,setLoadFailed]=useState(false);
     const [crop,setCrop]=useState<CropTarget|null>(null),[todayKey,setTodayKey]=useState(taipeiDateKey()),[taskBusy,setTaskBusy]=useState(""),[taskConfirm,setTaskConfirm]=useState<DailyTaskRecord|null>(null),[taskSyncError,setTaskSyncError]=useState(false),[officialLibraryOpen,setOfficialLibraryOpen]=useState(false);
     const [savedSettingsSignature,setSavedSettingsSignature]=useState(""),[savingSettings,setSavingSettings]=useState(false),[imageUploading,setImageUploading]=useState(false),[keyboardOpen,setKeyboardOpen]=useState(false),[pendingSettingsIntent,setPendingSettingsIntent]=useState<SettingsIntent|null>(null);
     const [invalidIntegerFields,setInvalidIntegerFields]=useState<Set<string>>(()=>new Set()),[integerResetSignal,setIntegerResetSignal]=useState(0);
@@ -646,7 +674,7 @@ export default function App() {
     const setIntegerValidity=useCallback((key:string,invalid:boolean)=>{setInvalidIntegerFields(current=>{const next=new Set(current);if(invalid)next.add(key);else next.delete(key);return next.size===current.size&&[...next].every(item=>current.has(item))?current:next})},[]);
     const revisionRef=useRef(0),settingsDirtyRef=useRef(false),settingsBusyRef=useRef(false),savingSettingsRef=useRef(false),savedStateRef=useRef<State|null>(null),intentTriggerRef=useRef<HTMLElement|null>(null),toastTimerRef=useRef<ReturnType<typeof setTimeout>|null>(null);
     const settingsPanelRef=useRef<HTMLDivElement|null>(null),settingsTabButtonRefs=useRef<Partial<Record<SettingsTabKey,HTMLButtonElement>>>({}),settingsTabScrollPositions=useRef<Partial<Record<SettingsTabKey,number>>>({});
-    const child = data.children.find(c => c.id === cid) || data.children[0];
+    const child = data.children.find(c => c.id === cid) || data.children[0] || emptyChild;
     const childBalance=useMemo(()=>calculateChildStarBalance(data.entries,data.redemptions,child.id),[data.entries,data.redemptions,child.id]);
     useEffect(()=>{
         const parameters=new URLSearchParams(window.location.search),debugEnabled=process.env.NODE_ENV==="development"||parameters.get("debugStars")==="1"||window.localStorage.getItem("star-diary:debug-stars")==="1";
@@ -656,7 +684,12 @@ export default function App() {
     const currentSettingsSignature=useMemo(()=>settingsSignature(data,""),[data]);
     const hasUnsavedChanges=Boolean(savedSettingsSignature)&&currentSettingsSignature!==savedSettingsSignature;
     const showSettingsSaveBar=role==="家長"&&tab==="家庭設定"&&(hasUnsavedChanges||invalidIntegerFields.size>0||imageUploading||savingSettings);
-    useEffect(() => { reloadState().finally(() => setLoading(false)); }, []);
+    useEffect(() => { reloadState().then(result=>setLoadFailed(!result)).finally(() => setLoading(false)); }, []);
+    useEffect(()=>{
+        const expired=()=>{setData(fallback);setCid("");setPassword("");setLoadFailed(false);setLoading(true);window.location.replace("/")};
+        window.addEventListener(SESSION_EXPIRED_EVENT,expired);
+        return()=>window.removeEventListener(SESSION_EXPIRED_EVENT,expired);
+    },[]);
     useEffect(()=>{
         if(loading)return;
         document.documentElement.dataset.starDiaryReady="true";
@@ -716,11 +749,11 @@ export default function App() {
     function normalizedClientState(loaded:Partial<State>):State{const normalized:State={...fallback,...loaded,children:Array.isArray(loaded.children)?loaded.children:fallback.children,entries:Array.isArray(loaded.entries)?loaded.entries:[],rewards:Array.isArray(loaded.rewards)?loaded.rewards:[],templates:normalizeTemplateSortOrders(Array.isArray(loaded.templates)?loaded.templates:[]),redemptions:Array.isArray(loaded.redemptions)?loaded.redemptions:[],specialRewards:Array.isArray(loaded.specialRewards)?loaded.specialRewards:[],rewardIconLibrary:Array.isArray(loaded.rewardIconLibrary)?loaded.rewardIconLibrary:[],dailyTasks:Array.isArray(loaded.dailyTasks)?loaded.dailyTasks:[],dailyTaskRecords:Array.isArray(loaded.dailyTaskRecords)?loaded.dailyTaskRecords:[],dailyTaskSettings:loaded.dailyTaskSettings&&typeof loaded.dailyTaskSettings==="object"?loaded.dailyTaskSettings:{},favoriteOfficialTaskIds:Array.isArray(loaded.favoriteOfficialTaskIds)?loaded.favoriteOfficialTaskIds:[],dailyTaskSortMode:loaded.dailyTaskSortMode==="custom"?"custom":"flow"};return withCalculatedStarBalances(normalized)}
     function establishSettingsBaseline(next:State){const snapshot=clonePersistedState(next);savedStateRef.current=snapshot;setSavedSettingsSignature(settingsSignature(snapshot,""));setInvalidIntegerFields(new Set());setIntegerResetSignal(value=>value+1)}
     function applyServerPayload(result:{state?:Partial<State>;revision?:number;passwordSet?:boolean;security?:SecurityInfo},options:{replaceSettings?:boolean;establishBaseline?:boolean}={}){const incoming=Number(result.revision);if(Number.isFinite(incoming)&&incoming<revisionRef.current)return false;if(result.state){const next=normalizedClientState(result.state),preserveDraft=settingsDirtyRef.current&&!options.replaceSettings;if(preserveDraft)setData(current=>applyEditableSettings(next,current));else{setData(next);setCid(current=>next.children.some(item=>item.id===current)?current:(next.children[0]?.id||current));if(options.establishBaseline!==false)establishSettingsBaseline(next)}}if(Number.isFinite(incoming))revisionRef.current=incoming;if(typeof result.passwordSet==="boolean")setPasswordSet(result.passwordSet);if(result.security)setSecurityInfo(result.security);return true}
-    async function reloadState():Promise<State|null>{try{const response=await fetch(`/api/state?t=${Date.now()}`,{cache:"no-store"}),result=await response.json();if(!response.ok||!result.state)throw new Error(result.error||"無法讀取資料");const next=normalizedClientState(result.state),applied=applyServerPayload(result);setTodayKey(taipeiDateKey());return applied?next:null}catch{return null}}
+    async function reloadState():Promise<State|null>{try{const response=await authenticatedFetch(`/api/state?t=${Date.now()}`,{cache:"no-store"}),result=await response.json();if(!response.ok||!result.state)throw new Error(result.error||"無法讀取資料");const next=normalizedClientState(result.state),applied=applyServerPayload(result);setTodayKey(taipeiDateKey());setLoadFailed(false);return applied?next:null}catch{return null}}
     async function refreshAnalytics(){const latest=await reloadState();say(latest?"分析資料已刷新":"刷新失敗，請檢查網路後再試");return latest}
-    async function rebaseSettingsDraft(draft:State){try{const response=await fetch(`/api/state?t=${Date.now()}`,{cache:"no-store"}),result=await response.json();if(!response.ok||!result.state)return false;const incoming=Number(result.revision);if(Number.isFinite(incoming))revisionRef.current=incoming;if(typeof result.passwordSet==="boolean")setPasswordSet(result.passwordSet);if(result.security)setSecurityInfo(result.security);const remote=normalizedClientState(result.state),merged=applyEditableSettings(remote,draft);establishSettingsBaseline(remote);setData(merged);setCid(current=>merged.children.some(item=>item.id===current)?current:(merged.children[0]?.id||current));setTodayKey(taipeiDateKey());return true}catch{return false}}
-    async function persist(next: State,options:PersistOptions={}) {const balancedNext=withCalculatedStarBalances(next);if(options.optimistic!==false)setData(balancedNext);try{const r = await fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", state: balancedNext, password,expectedRevision:revisionRef.current }) }),x=await r.json();if(!r.ok){if(options.preserveDraftOnFailure){if(r.status===409&&options.draftForRebase&&await rebaseSettingsDraft(options.draftForRebase))say("其他裝置已有新資料，未儲存內容已保留，請確認後再次儲存");else say(x.error || "儲存失敗，未儲存內容仍為你保留");return false}await reloadState();say(x.error || "儲存失敗");return false}const applied=applyServerPayload(x,{replaceSettings:true,establishBaseline:true});if(!applied){say("收到較舊的儲存結果，請再試一次");return false}say(options.successMessage||"已儲存所有設定");return true}catch{if(!options.preserveDraftOnFailure)await reloadState();say(options.preserveDraftOnFailure?"儲存失敗，未儲存內容仍為你保留":"儲存失敗，請檢查網路後再試");return false}}
-    async function submitPending(action:"child_entry"|"child_redemption",record:Entry|Redeem,next:State){setData(withCalculatedStarBalances(next));try{const r=await fetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,record})}),x=await r.json();if(!r.ok){await reloadState();say(x.error||"送出失敗");return false}applyServerPayload(x);say("已送出，等待家長確認");return true}catch{await reloadState();say("送出失敗，請檢查網路後再試");return false}}
+    async function rebaseSettingsDraft(draft:State){try{const response=await authenticatedFetch(`/api/state?t=${Date.now()}`,{cache:"no-store"}),result=await response.json();if(!response.ok||!result.state)return false;const incoming=Number(result.revision);if(Number.isFinite(incoming))revisionRef.current=incoming;if(typeof result.passwordSet==="boolean")setPasswordSet(result.passwordSet);if(result.security)setSecurityInfo(result.security);const remote=normalizedClientState(result.state),merged=applyEditableSettings(remote,draft);establishSettingsBaseline(remote);setData(merged);setCid(current=>merged.children.some(item=>item.id===current)?current:(merged.children[0]?.id||current));setTodayKey(taipeiDateKey());return true}catch{return false}}
+    async function persist(next: State,options:PersistOptions={}) {const balancedNext=withCalculatedStarBalances(next);if(options.optimistic!==false)setData(balancedNext);try{const r = await authenticatedFetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", state: balancedNext, password,expectedRevision:revisionRef.current }) }),x=await r.json();if(!r.ok){if(options.preserveDraftOnFailure){if(r.status===409&&options.draftForRebase&&await rebaseSettingsDraft(options.draftForRebase))say("其他裝置已有新資料，未儲存內容已保留，請確認後再次儲存");else say(x.error || "儲存失敗，未儲存內容仍為你保留");return false}await reloadState();say(x.error || "儲存失敗");return false}const applied=applyServerPayload(x,{replaceSettings:true,establishBaseline:true});if(!applied){say("收到較舊的儲存結果，請再試一次");return false}say(options.successMessage||"已儲存所有設定");return true}catch{if(!options.preserveDraftOnFailure)await reloadState();say(options.preserveDraftOnFailure?"儲存失敗，未儲存內容仍為你保留":"儲存失敗，請檢查網路後再試");return false}}
+    async function submitPending(action:"child_entry"|"child_redemption",record:Entry|Redeem,next:State){setData(withCalculatedStarBalances(next));try{const r=await authenticatedFetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,record})}),x=await r.json();if(!r.ok){await reloadState();say(x.error||"送出失敗");return false}applyServerPayload(x);say("已送出，等待家長確認");return true}catch{await reloadState();say("送出失敗，請檢查網路後再試");return false}}
     function editSettings(update:State|((current:State)=>State)){setData(current=>typeof update==="function"?(update as (value:State)=>State)(current):update)}
     function restoreSettingsSnapshot(showToast=true){const snapshot=savedStateRef.current;if(!snapshot)return null;setData(current=>applyEditableSettings(current,snapshot));setInvalidIntegerFields(new Set());setIntegerResetSignal(value=>value+1);settingsDirtyRef.current=false;setCid(current=>snapshot.children.some(item=>item.id===current)?current:(snapshot.children[0]?.id||current));if(showToast)say("已取消未儲存的變更");return snapshot}
     function performSettingsIntent(intent:SettingsIntent,availableState:State=data){
@@ -742,12 +775,12 @@ export default function App() {
     function continueEditing(){setPendingSettingsIntent(null)}
     function discardAndContinue(){const intent=pendingSettingsIntent;if(!intent)return;const snapshot=restoreSettingsSnapshot(false);setPendingSettingsIntent(null);if(snapshot)performSettingsIntent(intent,snapshot);say("已取消未儲存的變更")}
     async function saveAllSettings(){if(savingSettingsRef.current||imageUploading)return false;if(invalidIntegerFields.size){say("請先修正空白或超出範圍的數字欄位");return false}if(!hasUnsavedChanges)return true;const invalidWeekdayTask=data.dailyTasks.find(task=>task.enabled&&!normalizeWeekdays(task.weekdays).length);if(invalidWeekdayTask){say(`「${invalidWeekdayTask.title}」請至少選擇一個執行星期`);return false}const invalidTask=data.dailyTasks.find(task=>task.enabled&&!task.applicableChildIds.length);if(invalidTask){say(`「${invalidTask.title}」請至少選擇一位適用孩子`);return false}savingSettingsRef.current=true;setSavingSettings(true);const draft=clonePersistedState(data),next=prepareSettingsForSave(draft);try{return await persist(next,{preserveDraftOnFailure:true,optimistic:false,successMessage:"✅ 已儲存",draftForRebase:draft})}finally{savingSettingsRef.current=false;setSavingSettings(false)}}
-    async function enterParent() { if(role==="家長")return;if (!passwordSet) {
+    async function enterParent() { if(account.role==="viewer"){say("此帳號是唯讀成員，無法修改家庭資料");return}if(role==="家長")return;if (!passwordSet) {
         setRole("家長");
         goTab("家庭設定");
         return;
     } setLogin(true); }
-    async function verify() { const r = await fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "verify", password }) }); if (r.ok) {
+    async function verify() { const r = await authenticatedFetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "verify", password }) }); if (r.ok) {
         setRole("家長");
         setLogin(false);
         say("已進入家長模式");
@@ -755,9 +788,12 @@ export default function App() {
     else
         say("密碼錯誤"); }
     ;
+    async function createFirstChild(name:string){const id=crypto.randomUUID(),next:State={...data,children:[{id,name,gender:"boy",avatar:"boy",stars:0}],dailyTaskSettings:{[id]:{...DEFAULT_DAILY_TASK_SETTINGS}}};const saved=await persist(next,{successMessage:"家庭已建立"});if(saved)setCid(id);return saved}
     if (loading)
         return <main className="loading" aria-label="正在載入家庭資料"><span className="visually-hidden">正在載入家庭資料</span></main>;
-    return <main className={showSettingsSaveBar?"has-settings-save-bar":undefined}><header className="topbar"><button type="button" className="brand" aria-label="返回首頁｜星星日記" onClick={event => goTab("首頁",event.currentTarget)}><img className="brand-logo" src="/star-diary-logo.jpg" alt="" width={48} height={48}/><span className="brand-label">星星日記</span></button><nav aria-label="主要導覽">{["首頁", "任務挑戰", "星星紀錄", "資料分析", "星星寶庫", "兌換紀錄", ...(role === "家長" ? ["家庭設定"] : [])].map(x => <button key={x} className={tab === x ? "active" : ""} aria-current={tab===x?"page":undefined} onClick={event => goTab(x,event.currentTarget)}>{x}</button>)}</nav><div className="role-switch"><button className={role === "家長" ? "on" : ""} onClick={enterParent}>家長</button><button className={role === "孩子" ? "on" : ""} onClick={event=>switchToChildMode(event.currentTarget)}>孩子</button></div></header><section className="shell"><div className="hello"><div><p className="eyebrow">FAMILY STAR JOURNAL</p><h1>{tab === "首頁" ? `嗨，${child.name}！今天也很棒 👋` : tab}</h1><p>每位孩子都有自己的星星與完整紀錄。</p></div><label className="child-pill"><Avatar c={child}/><select value={cid} onChange={event => requestChildChange(event.target.value,event.currentTarget)}>{data.children.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label></div>
+    if(loadFailed)return <FamilyLoadError account={account} onRetry={async()=>Boolean(await reloadState())}/>;
+    if(!data.children.length)return <EmptyFamilyOnboarding account={account} onCreate={createFirstChild}/>;
+    return <main className={showSettingsSaveBar?"has-settings-save-bar":undefined}><header className="topbar"><button type="button" className="brand" aria-label="返回首頁｜星星日記" onClick={event => goTab("首頁",event.currentTarget)}><img className="brand-logo" src="/star-diary-logo.jpg" alt="" width={48} height={48}/><span className="brand-label">星星日記</span></button><nav aria-label="主要導覽">{["首頁", "任務挑戰", "星星紀錄", "資料分析", "星星寶庫", "兌換紀錄", ...(role === "家長" ? ["家庭設定"] : [])].map(x => <button key={x} className={tab === x ? "active" : ""} aria-current={tab===x?"page":undefined} onClick={event => goTab(x,event.currentTarget)}>{x}</button>)}</nav><div className="role-switch"><button className={role === "家長" ? "on" : ""} onClick={enterParent}>家長</button><button className={role === "孩子" ? "on" : ""} onClick={event=>switchToChildMode(event.currentTarget)}>孩子</button></div><div className="signed-in-account">{account.image?<img src={account.image} alt="" referrerPolicy="no-referrer"/>:<span aria-hidden="true">G</span>}<div><strong>{account.name||"Google 使用者"}</strong><small>{account.email}</small></div><button type="button" onClick={()=>{setData(fallback);setCid("");setLoading(true);void signOut({callbackUrl:"/"})}}>登出</button></div></header><section className="shell"><div className="hello"><div><p className="eyebrow">FAMILY STAR JOURNAL</p><h1>{tab === "首頁" ? `嗨，${child.name}！今天也很棒 👋` : tab}</h1><p>每位孩子都有自己的星星與完整紀錄。</p></div><label className="child-pill"><Avatar c={child}/><select value={cid} onChange={event => requestChildChange(event.target.value,event.currentTarget)}>{data.children.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label></div>
     {tab === "首頁" && <><section className="hero-grid"><article className="balance-card"><p>我的星星</p><div className="big-star"><span>★</span><strong>{childBalance.total}</strong></div><small>每一次努力，都值得被看見</small></article><QuickTemplateHomeCard/><article className="quick-card"><p>新增紀錄</p><strong>今天發生什麼事？</strong><div><button onClick={() => setRecord(true)}><span>＋★</span>加星／扣星／特殊</button></div></article></section><Title text="最近紀錄"/><Entries /></>}
     {tab === "任務挑戰" && TaskChallenge()}
     {tab === "星星紀錄" && <><div className="record-tools"><span>{role==="家長"?"新增時可指定今天或過去的發生時間":"日期與時間會自動記錄"}</span>{role === "家長" && <button className="primary" onClick={() => setRecord(true)}>＋ 新增紀錄</button>}</div><Entries /></>}
@@ -768,7 +804,7 @@ export default function App() {
     async function runTaskAction(taskRecord:DailyTaskRecord,operation:"complete"|"approve"|"reject"|"skip"|"restore"|"undo"){
         if(taskBusy)return;setTaskBusy(taskRecord.id);
         try{
-            const childAction=role==="孩子"&&operation==="complete",response=await fetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(childAction?{action:"child_daily_task_complete",recordId:taskRecord.id,childId:cid}:{action:"parent_daily_task_action",recordId:taskRecord.id,operation,password})}),result=await response.json();
+            const childAction=role==="孩子"&&operation==="complete",response=await authenticatedFetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(childAction?{action:"child_daily_task_complete",recordId:taskRecord.id,childId:cid}:{action:"parent_daily_task_action",recordId:taskRecord.id,operation,password})}),result=await response.json();
             if(!response.ok)throw new Error(result.error||"任務更新失敗");
             applyServerPayload(result);
             setTaskSyncError(false);
@@ -846,7 +882,7 @@ export default function App() {
         say("圖片上傳中…");
         try{
             const fd=new FormData();fd.append("file",uploadFile);fd.append("kind",kind);
-            const res=await fetch("/api/media",{method:"POST",body:fd});
+            const res=await authenticatedFetch("/api/media",{method:"POST",body:fd});
             const x=await res.json().catch(()=>({}));
             if(!res.ok||typeof x.url!=="string"){say(x.error||"圖片上傳失敗");return null}
             return x.url as string;

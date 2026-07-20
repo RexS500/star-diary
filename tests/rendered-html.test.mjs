@@ -10,7 +10,9 @@ test("Star Diary keeps its production metadata and application shell", async () 
   ]);
   assert.match(layout, /lang="zh-Hant"/);
   assert.match(layout, /title:\s*"星星日記｜家庭獎勵追蹤"/);
-  assert.match(page, /<StarHome\s*\/>/);
+  assert.match(page, /<StarHome account=\{\{ \.\.\.account, role \}\}\s*\/>/);
+  assert.match(page, /const session = await auth\(\)/);
+  assert.match(page, /<LoginScreen/);
   assert.match(home, /正在載入家庭資料/);
   assert.doesNotMatch(`${layout}\n${page}\n${home}`, /codex-preview|Your site is taking shape|Codex is working/i);
 });
@@ -103,8 +105,8 @@ test("record modal keeps one mounted scroll container while the iPhone keyboard 
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
   const modalAt = home.indexOf("function RecordModal(");
-  const appAt = home.indexOf("export default function App()");
-  const modalEnd = home.indexOf("function Analytics(", modalAt);
+  const appAt = home.indexOf("export default function App(");
+  const modalEnd = home.indexOf("function SecretField(", modalAt);
   const modal = home.slice(modalAt, modalEnd);
   assert.ok(modalAt >= 0 && modalAt < appAt, "RecordModal must stay at module scope so parent renders do not remount it");
   assert.equal(home.match(/function RecordModal\(/g)?.length, 1);

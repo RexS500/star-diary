@@ -10,14 +10,18 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "node --experimental-strip-types --test tests/rendered-html.test.mjs tests/daily-task-logic.test.mjs tests/settings-draft.test.mjs tests/analytics-logic.test.mjs tests/analytics-report.test.mjs tests/excel-export.test.mjs tests/record-time.test.mjs tests/security-logic.test.mjs tests/state-api-contract.test.mjs tests/integer-input-logic.test.mjs tests/official-task-library.test.mjs tests/quick-template-logic.test.mjs tests/weekday-selection.test.mjs tests/pwa.test.mjs tests/star-balance.test.mjs",
-    "verify": "npm run lint && npm run test && npm run build",
+    "test": "node --experimental-strip-types --test tests/rendered-html.test.mjs tests/daily-task-logic.test.mjs tests/settings-draft.test.mjs tests/analytics-logic.test.mjs tests/analytics-report.test.mjs tests/excel-export.test.mjs tests/record-time.test.mjs tests/security-logic.test.mjs tests/state-api-contract.test.mjs tests/integer-input-logic.test.mjs tests/official-task-library.test.mjs tests/quick-template-logic.test.mjs tests/weekday-selection.test.mjs tests/pwa.test.mjs tests/star-balance.test.mjs tests/auth-family-isolation.test.mjs tests/auth-contract.test.mjs tests/media-scope.test.mjs",
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "typecheck": "tsc --noEmit --incremental false",
+    "db:auth:migrate:local": "wrangler d1 execute DB --config dist/server/wrangler.json --local --persist-to .wrangler/state --file drizzle/0002_auth_and_family_scope.sql",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@auth/d1-adapter": "1.11.2",
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",
+    "next-auth": "5.0.0-beta.31",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

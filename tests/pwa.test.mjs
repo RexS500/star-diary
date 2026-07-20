@@ -44,13 +44,16 @@ test("Apple and browser assets are generated from the project logo at valid size
 
 test("service worker caches the shell while protecting live state and version checks", async () => {
   const sw = await readFile(new URL("public/sw.js", root), "utf8");
-  assert.match(sw, /CACHE_PREFIX = "star-diary-pwa-v2"/);
+  assert.match(sw, /CACHE_PREFIX = "star-diary-pwa-v3-auth"/);
   assert.match(sw, /request\.method !== "GET"/);
   assert.match(sw, /url\.pathname === "\/api\/state"/);
-  assert.match(sw, /networkFirst\(request, DATA_CACHE\)/);
+  assert.match(sw, /url\.pathname\.startsWith\("\/api\/auth"\)/);
+  assert.match(sw, /url\.pathname\.startsWith\("\/api\/media"\)/);
+  assert.doesNotMatch(sw, /DATA_CACHE|cache\.put\(request.*api\/state/);
   assert.match(sw, /url\.pathname === "\/api\/version"/);
   assert.match(sw, /cache: "no-store"/);
   assert.match(sw, /request\.mode === "navigate"/);
+  assert.match(sw, /caches\.match\("\/offline\.html"\)/);
   assert.match(sw, /staleWhileRevalidate/);
   assert.match(sw, /SKIP_WAITING/);
   assert.match(sw, /caches\.delete/);
