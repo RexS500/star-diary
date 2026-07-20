@@ -22,7 +22,15 @@ import {
     verifySecret,
 } from "../../security-logic";
 import { calculateChildStarBalance, reconcileChildStarBalances } from "../../star-balance";
-import { FamilyAccessError, familyAccessErrorResponse, requireFamilyMembership } from "../../family-access";
+import {
+    FamilyAccessError,
+    assertChildPermission,
+    familyAccessErrorResponse,
+    getMemberChildPermissions,
+    requireFamilyMembership,
+    type FamilyAccess,
+    type MemberChildPermission,
+} from "../../family-access";
 
 const initial = {
     children: [],
@@ -138,7 +146,7 @@ function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt));
 }
 
-function normalizeDailyTaskRecords(value: unknown, _childIds: Set<string>) {
+function normalizeDailyTaskRecords(value: unknown) {
     const statuses = new Set<DailyTaskStatus>(["pending", "completed", "skipped", "pending_approval"]), nowIso = new Date().toISOString();
     if (!Array.isArray(value)) return [];
     return value.map(raw => {
@@ -193,7 +201,7 @@ function normalizeState(value: unknown): StoredState {
 
     const childIds = new Set<string>(state.children.map((child: JsonRecord) => child.id).filter((id: unknown): id is string => typeof id === "string"));
     state.dailyTasks = normalizeDailyTasks(state.dailyTasks, childIds);
-    state.dailyTaskRecords = normalizeDailyTaskRecords(state.dailyTaskRecords, childIds);
+    state.dailyTaskRecords = normalizeDailyTaskRecords(state.dailyTaskRecords);
     const rawSettings = asRecord(state.dailyTaskSettings), settings: DailyTaskSettingsMap = {};
     for (const childId of childIds) settings[childId] = taskSettingsForChild(rawSettings as DailyTaskSettingsMap, childId);
     state.dailyTaskSettings = settings;
@@ -332,6 +340,61 @@ function safePayload(state: StoredState, revision: number, extra: JsonRecord = {
     };
 }
 
+function stateForFamilyAccess(
+    state: StoredState,
+    family: FamilyAccess,
+    permissions: MemberChildPermission[],
+) {
+    if (family.role !== "child") return state;
+    const visibleChildIds = new Set(
+        permissions.filter(permission => permission.canView).map(permission => permission.childId),
+    );
+    const safe = { ...state } as StoredState;
+    safe.children = state.children.filter(child => visibleChildIds.has(String(child.id)));
+    safe.entries = state.entries.filter(entry => visibleChildIds.has(String(entry.childId)));
+    safe.redemptions = state.redemptions.filter((redemption: JsonRecord) => visibleChildIds.has(String(redemption.childId)));
+    safe.dailyTaskRecords = state.dailyTaskRecords.filter(record => visibleChildIds.has(record.childId));
+    safe.dailyTasks = state.dailyTasks.flatMap(task => {
+        const applicableChildIds = task.applicableChildIds.filter(childId => visibleChildIds.has(childId));
+        return applicableChildIds.length ? [{ ...task, applicableChildIds }] : [];
+    });
+    safe.dailyTaskSettings = Object.fromEntries(
+        Object.entries(state.dailyTaskSettings).filter(([childId]) => visibleChildIds.has(childId)),
+    );
+    // Child accounts never receive parent-only quick actions or settings-only asset metadata.
+    safe.templates = [];
+    safe.rewardIconLibrary = [];
+    safe.favoriteOfficialTaskIds = [];
+    return safe;
+}
+
+function accessPayload(
+    state: StoredState,
+    revision: number,
+    family: FamilyAccess,
+    permissions: MemberChildPermission[],
+    extra: JsonRecord = {},
+) {
+    const payload = safePayload(stateForFamilyAccess(state, family, permissions), revision, extra);
+    if (family.role === "child") {
+        payload.security = { configured: false, questionType: "", questionText: "", hint: "" };
+    }
+    return {
+        ...payload,
+        access: {
+            role: family.role,
+            boundChildId: family.boundChildId,
+            permissions,
+        },
+    };
+}
+
+function requireFamilyManager(family: FamilyAccess) {
+    if (family.role !== "owner" && family.role !== "parent") {
+        throw new FamilyAccessError("孩子帳號無法修改家庭設定或新增星星紀錄", 403);
+    }
+}
+
 const dailyRecordKey = (record: Pick<DailyTaskRecord, "definitionId" | "childId" | "date">) => `${record.definitionId}|${record.childId}|${record.date}`;
 
 function isActiveTaskEntry(entry: JsonRecord, record: DailyTaskRecord) {
@@ -378,9 +441,11 @@ function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "
 
 export async function GET() {
     try {
-        const { familyId } = await requireFamilyMembership("read");
+        const family = await requireFamilyMembership("read");
+        const { familyId } = family;
+        const permissions = await getMemberChildPermissions(family);
         const { state, revision } = await setup(familyId);
-        return Response.json(safePayload(state, revision), { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } });
+        return Response.json(accessPayload(state, revision, family, permissions), { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } });
     } catch (error) {
         if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);
         return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof ApiError ? error.status : 500, headers: { "Cache-Control": "no-store" } });
@@ -389,7 +454,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
     try {
-        const { familyId } = await requireFamilyMembership("write");
+        const family = await requireFamilyMembership("read");
+        const { familyId } = family;
+        const permissions = await getMemberChildPermissions(family);
         const body = await req.json() as {
             action: string;
             password?: string;
@@ -410,6 +477,9 @@ export async function POST(req: Request) {
             expectedRevision?: number;
         };
 
+        const childAccountActions = new Set(["child_redemption", "child_daily_task_complete"]);
+        if (family.role === "child" && !childAccountActions.has(body.action)) requireFamilyManager(family);
+
         if (body.action === "set_parent_password") {
             const passwordError = validatePasswordPair(body.newPassword || "", body.confirmPassword || "");
             if (passwordError) throw new ApiError(passwordError, 400);
@@ -425,7 +495,7 @@ export async function POST(req: Request) {
                 state.securityResetTokenHash = "";
                 state.securityResetTokenExpiresAt = "";
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
         if (body.action === "change_parent_password") {
@@ -438,7 +508,7 @@ export async function POST(req: Request) {
                 state.securityResetTokenHash = "";
                 state.securityResetTokenExpiresAt = "";
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
         if (body.action === "update_security_question") {
@@ -458,7 +528,7 @@ export async function POST(req: Request) {
                 state.securityResetTokenHash = "";
                 state.securityResetTokenExpiresAt = "";
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
         if (body.action === "verify_security_answer") {
@@ -484,7 +554,7 @@ export async function POST(req: Request) {
                 return true;
             });
             if (!answerCorrect) throw new ApiError(lockedAfterFailure ? "嘗試次數過多，請稍後再試" : "答案不正確，請再試一次", lockedAfterFailure ? 429 : 403);
-            return Response.json(safePayload(result.state, result.revision, { recoveryToken }));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions, { recoveryToken }));
         }
 
         if (body.action === "reset_parent_password") {
@@ -500,10 +570,11 @@ export async function POST(req: Request) {
                 state.securityFailedAttempts = 0;
                 state.securityLockedUntil = "";
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
         if (body.action === "child_entry") {
+            requireFamilyManager(family);
             const submitted = body.record;
             if (!submitted || submitted.status !== "pending" || submitted.sourceType || submitted.sourceId || submitted.revokedAt || submitted.occurredAt) throw new ApiError("不正確的孩子紀錄", 400);
             const type = submitted.type === "deduct" || submitted.type === "special" ? submitted.type : submitted.type === "star" ? "star" : null;
@@ -514,21 +585,25 @@ export async function POST(req: Request) {
                 if (state.entries.some(entry => entry.id === record.id)) return false;
                 state.entries = [record, ...state.entries];
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
         if (body.action === "child_redemption") {
             const record = body.record;
             if (!record || record.status !== "pending") throw new ApiError("不正確的兌換申請", 400);
+            if (typeof record.childId !== "string") throw new ApiError("兌換申請缺少孩子資料", 400);
+            await assertChildPermission(family, record.childId, "operate");
             const result = await mutateState(familyId, state => {
                 if (!state.children.some(child => child.id === record.childId)) throw new ApiError("找不到孩子資料", 404);
                 if (state.redemptions.some((item: JsonRecord) => item.id === record.id)) return false;
                 state.redemptions = [record, ...state.redemptions];
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
         if (body.action === "child_daily_task_complete") {
+            if (!body.childId) throw new ApiError("任務缺少孩子資料", 400);
+            await assertChildPermission(family, body.childId, "operate");
             const result = await mutateState(familyId, state => {
                 const today = taipeiDateKey(), record = state.dailyTaskRecords.find(item => item.id === body.recordId && item.childId === body.childId && item.date === today);
                 if (!record) throw new ApiError("找不到今天的任務，請刷新後再試", 404);
@@ -546,10 +621,11 @@ export async function POST(req: Request) {
                 }
                 return completeDailyTask(state, record, "child");
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
         if (body.action === "parent_daily_task_action") {
+            requireFamilyManager(family);
             const result = await mutateState(familyId, async state => {
                 await requireParent(state, body.password || "");
                 const record = state.dailyTaskRecords.find(item => item.id === body.recordId);
@@ -592,9 +668,10 @@ export async function POST(req: Request) {
                 }
                 throw new ApiError("不支援的任務操作", 400);
             });
-            return Response.json(safePayload(result.state, result.revision));
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
+        requireFamilyManager(family);
         const current = await setup(familyId);
         await requireParent(current.state, body.password || "");
         if (body.action === "verify") return Response.json({ ok: true, revision: current.revision });
@@ -616,6 +693,16 @@ export async function POST(req: Request) {
                 if (task.enabled !== false && !applicable.some(childId => typeof childId === "string" && validChildIds.has(childId))) throw new ApiError("啟用的每日任務請至少選擇一位適用孩子", 400);
                 if (task.enabled !== false && uniqueWeekdays(task.weekdays).length === 0) throw new ApiError("啟用的每日任務請至少選擇一個執行星期", 400);
                 if (!isPositiveInteger(task.rewardStars)) throw new ApiError("每日任務獎勵必須是至少 1 的整數", 400);
+            }
+        }
+        if (Array.isArray(body.state.children)) {
+            const submittedChildIds = new Set(body.state.children.map(raw => asRecord(raw).id).filter((id): id is string => typeof id === "string" && Boolean(id)));
+            const [boundMembersResult] = await env.DB.batch([env.DB.prepare(
+                "SELECT child_id FROM family_members WHERE family_id = ? AND role = 'child' AND status = 'active' AND child_id IS NOT NULL",
+            ).bind(familyId)]);
+            const boundMembers = boundMembersResult.results as Array<{ child_id: string }>;
+            if (boundMembers.some(member => !submittedChildIds.has(member.child_id))) {
+                throw new ApiError("這位孩子仍綁定孩子帳號，請先在帳號管理移除該成員", 409);
             }
         }
         if (Array.isArray(body.state.rewards) && body.state.rewards.some(raw => !isPositiveInteger(asRecord(raw).cost))) throw new ApiError("獎品需要星星必須是至少 1 的整數", 400);
@@ -642,7 +729,7 @@ export async function POST(req: Request) {
         next.dailyTasks = prepareTaskDefinitionsForSave(current.state.dailyTasks, next.dailyTasks);
         reconcileTodayPendingRecords(next);
         const saved = await writeState(next, current.revision, familyId);
-        return Response.json(safePayload(saved.state, saved.revision));
+        return Response.json(accessPayload(saved.state, saved.revision, family, permissions));
     } catch (error) {
         if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);
         return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof ApiError ? error.status : 500 });

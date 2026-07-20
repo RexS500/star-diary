@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Auth.js official D1 adapter tables. Column names intentionally match the
@@ -59,12 +60,52 @@ export const families = sqliteTable("families", {
 export const familyMembers = sqliteTable("family_members", {
   familyId: text("family_id").notNull().references(() => families.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  role: text("role", { enum: ["owner", "parent", "viewer"] }).notNull(),
+  role: text("role", { enum: ["owner", "parent", "child"] }).notNull(),
+  childId: text("child_id"),
   createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
 }, table => [
   primaryKey({ columns: [table.familyId, table.userId] }),
-  index("family_members_user_id_idx").on(table.userId),
+  uniqueIndex("family_members_user_unique").on(table.userId),
+  uniqueIndex("family_members_child_binding_unique").on(table.familyId, table.childId)
+    .where(sql`${table.role} = 'child' AND ${table.childId} IS NOT NULL AND ${table.status} = 'active'`),
   index("family_members_family_id_idx").on(table.familyId),
+]);
+
+export const familyInvitations = sqliteTable("family_invitations", {
+  id: text("id").primaryKey().notNull(),
+  familyId: text("family_id").notNull().references(() => families.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  role: text("role", { enum: ["parent", "child"] }).notNull(),
+  childId: text("child_id"),
+  status: text("status", { enum: ["pending", "accepted", "expired", "cancelled"] }).notNull().default("pending"),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  acceptedAt: text("accepted_at"),
+  acceptedByUserId: text("accepted_by_user_id").references(() => users.id),
+  cancelledAt: text("cancelled_at"),
+}, table => [
+  uniqueIndex("family_invitations_token_hash_unique").on(table.tokenHash),
+  index("family_invitations_family_status_idx").on(table.familyId, table.status, table.expiresAt),
+  index("family_invitations_child_idx").on(table.familyId, table.childId),
+  uniqueIndex("family_invitations_pending_child_unique").on(table.familyId, table.childId)
+    .where(sql`${table.role} = 'child' AND ${table.status} = 'pending' AND ${table.childId} IS NOT NULL`),
+]);
+
+export const memberChildPermissions = sqliteTable("member_child_permissions", {
+  familyId: text("family_id").notNull(),
+  userId: text("user_id").notNull(),
+  childId: text("child_id").notNull(),
+  canView: integer("can_view", { mode: "boolean" }).notNull().default(false),
+  canOperate: integer("can_operate", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, table => [
+  primaryKey({ columns: [table.familyId, table.userId, table.childId] }),
+  index("member_child_permissions_user_idx").on(table.userId),
+  index("member_child_permissions_child_idx").on(table.familyId, table.childId),
 ]);
 
 export const familyState = sqliteTable("family_state", {

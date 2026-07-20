@@ -26,6 +26,6 @@ pnpm run build
 
 ## Google 登入與正式遷移
 
-完整的 Google Cloud、Cloudflare Secrets、D1 備份／遷移／還原、舊資料接管與驗收步驟，請見 [Google 登入與家庭隔離操作手冊](./docs/google-auth-family-isolation.md)。
+完整的 Google Cloud、Cloudflare Secrets、D1 備份／遷移／還原、舊資料接管與驗收步驟，請見 [Google 登入與家庭隔離操作手冊](./docs/google-auth-family-isolation.md)。帳號管理、一次性邀請與 Child 權限請見 [帳號管理與家庭邀請操作手冊](./docs/account-management-invitations.md)。
 
 正式環境必須先備份 D1、套用遷移並設定 Secrets，才可部署新版程式。不要把任何 Secret 寫入 Git。

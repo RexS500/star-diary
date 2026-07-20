@@ -2,11 +2,17 @@ import { env } from "cloudflare:workers";
 import type { Session } from "next-auth";
 import { auth } from "../auth";
 
-export type FamilyRole = "owner" | "parent" | "viewer";
+export type FamilyRole = "owner" | "parent" | "child";
+export type MemberChildPermission = {
+  childId: string;
+  canView: boolean;
+  canOperate: boolean;
+};
 export type FamilyAccess = {
   familyId: string;
   familyName: string;
   role: FamilyRole;
+  boundChildId: string | null;
   user: {
     id: string;
     email: string;
@@ -19,6 +25,7 @@ type MembershipRow = {
   family_id: string;
   family_name: string;
   role: FamilyRole;
+  child_id: string | null;
 };
 
 type FamilyRow = {
@@ -58,10 +65,10 @@ function sessionUser(session: Session | null): FamilyAccess["user"] {
 
 async function membershipForUser(userId: string) {
   return env.DB.prepare(
-    `SELECT fm.family_id, f.name AS family_name, fm.role
-       FROM family_members fm
+    `SELECT fm.family_id, f.name AS family_name, fm.role, fm.child_id
+      FROM family_members fm
        JOIN families f ON f.id = fm.family_id
-      WHERE fm.user_id = ?
+      WHERE fm.user_id = ? AND fm.status = 'active'
       ORDER BY CASE fm.role WHEN 'owner' THEN 0 WHEN 'parent' THEN 1 ELSE 2 END,
                fm.created_at ASC
       LIMIT 1`,
@@ -90,8 +97,10 @@ async function claimLegacyFamily(user: FamilyAccess["user"]) {
     throw new FamilyAccessError("既有家庭正在由管理者認領，請稍後再試", 403);
   }
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO family_members (family_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)",
-  ).bind(LEGACY_FAMILY_ID, user.id, now).run();
+    `INSERT OR IGNORE INTO family_members
+       (family_id, user_id, role, child_id, created_at, updated_at, status)
+     VALUES (?, ?, 'owner', NULL, ?, ?, 'active')`,
+  ).bind(LEGACY_FAMILY_ID, user.id, now, now).run();
   return membershipForUser(user.id);
 }
 
@@ -103,8 +112,10 @@ async function createFamilyForUser(user: FamilyAccess["user"]) {
       "INSERT OR IGNORE INTO families (id, name, legacy_state, created_at, updated_at) VALUES (?, ?, 0, ?, ?)",
     ).bind(familyId, familyNameForUser(user.name), now, now),
     env.DB.prepare(
-      "INSERT OR IGNORE INTO family_members (family_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)",
-    ).bind(familyId, user.id, now),
+      `INSERT OR IGNORE INTO family_members
+         (family_id, user_id, role, child_id, created_at, updated_at, status)
+       VALUES (?, ?, 'owner', NULL, ?, ?, 'active')`,
+    ).bind(familyId, user.id, now, now),
   ]);
   return membershipForUser(user.id);
 }
@@ -121,8 +132,40 @@ export async function getFamilyForAuthenticatedUser(
     familyId: membership.family_id,
     familyName: membership.family_name,
     role: membership.role,
+    boundChildId: membership.child_id,
     user,
   };
+}
+
+export async function getMemberChildPermissions(family: FamilyAccess): Promise<MemberChildPermission[]> {
+  if (family.role !== "child") return [];
+  const [result] = await env.DB.batch([env.DB.prepare(
+    `SELECT child_id, can_view, can_operate
+       FROM member_child_permissions
+      WHERE family_id = ? AND user_id = ?
+      ORDER BY child_id`,
+  ).bind(family.familyId, family.user.id)]);
+  const rows = result.results as Array<{ child_id: string; can_view: number; can_operate: number }>;
+  const permissions = rows.map(row => ({
+    childId: row.child_id,
+    canView: Boolean(row.can_view),
+    canOperate: Boolean(row.can_operate),
+  }));
+  if (family.boundChildId && !permissions.some(permission => permission.childId === family.boundChildId)) {
+    permissions.push({ childId: family.boundChildId, canView: true, canOperate: true });
+  }
+  return permissions;
+}
+
+export async function assertChildPermission(
+  family: FamilyAccess,
+  childId: string,
+  access: "view" | "operate",
+) {
+  if (family.role === "owner" || family.role === "parent") return;
+  const permission = (await getMemberChildPermissions(family)).find(item => item.childId === childId);
+  const allowed = access === "operate" ? permission?.canOperate : permission?.canView;
+  if (!allowed) throw new FamilyAccessError(access === "operate" ? "目前帳號不能操作這位孩子" : "目前帳號不能查看這位孩子", 403);
 }
 
 export async function requireAuthenticatedUser() {

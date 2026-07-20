@@ -8,7 +8,7 @@
 
 - `users`、`accounts`、`sessions`、`verification_tokens`：Auth.js 官方 D1 Adapter 使用的表。
 - `families`：家庭主檔；`legacy_state = 1` 表示上線前既有家庭。
-- `family_members`：使用者與家庭的關聯，角色為 `owner`、`parent`、`viewer`。
+- `family_members`：使用者與家庭的關聯；`0002` 原始角色為 `owner`、`parent`、`viewer`，套用 `0003` 後為 `owner`、`parent`、`child`。
 - `family_state`：沿用成熟的 Star Diary JSON 資料模型，但改成每個 `family_id` 一列。
 - `media_objects`：記錄新 R2 物件的家庭、種類與建立者。
 - `app_migrations`：記錄已套用的遷移版本。
@@ -17,11 +17,11 @@
 權限規則：
 
 - `owner`、`parent`：可讀寫家庭資料與圖片。
-- `viewer`：只可讀取；寫入 API 會回傳 403。
+- `child`：依 `member_child_permissions` 取得可查看／可操作孩子；不能直接加扣星或修改設定。完整規則見 [帳號管理與家庭邀請操作手冊](./account-management-invitations.md)。
 - 未登入：首頁顯示 Google 登入；私人 API 回傳 401。
 - 查不到或不屬於目前家庭的圖片：一律回傳 404，避免透露資源是否存在。
 
-目前產品仍是一位使用者預設進入一個家庭；資料表已支援未來邀請與多家庭，但這一版未加入邀請 UI 或家庭切換器。
+目前產品限制一個 Google 帳號只能加入一個家庭；`0003` 已加入 Parent／Child 邀請 UI，但尚未提供多家庭切換。
 
 ## 2. 必要環境變數
 
@@ -183,7 +183,7 @@ pnpm exec wrangler deploy --config dist/server/wrangler.json
 - owner 登入：看到既有家庭完整資料，新增／修改／刪除正常。
 - 第二個全新 Google 帳號：只看到建立第一位孩子的空家庭畫面。
 - A 帳號無法以 URL、Request body 或媒體 key 讀取 B 家庭資料。
-- `viewer` 可讀但不可 POST state、上傳或刪除圖片。
+- `child` 只可讀取獲准查看的孩子，並只可對 `can_operate = true` 的孩子提交任務完成或兌換；不可直接加扣星、上傳／刪除圖片或修改家庭設定。
 - 登出後使用瀏覽器返回、離線、重開 PWA：不出現前一帳號的私人畫面。
 - 同一帳號跨瀏覽器／裝置登入：由 D1 session 正常取得同一家庭。
 - Google 頭像只顯示在帳號區，不覆蓋孩子頭像。

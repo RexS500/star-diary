@@ -29,7 +29,7 @@ export function LoginScreen({ errorCode = "" }: { errorCode?: string }) {
         disabled={busy}
         onClick={() => {
           setBusy(true);
-          void signIn("google", { callbackUrl: "/" }).catch(() => setBusy(false));
+          void signIn("google", { callbackUrl: "/" }, { prompt: "select_account" }).catch(() => setBusy(false));
         }}
       >
         <span aria-hidden="true">G</span>

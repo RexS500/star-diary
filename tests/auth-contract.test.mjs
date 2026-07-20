@@ -15,7 +15,8 @@ test("the page and private APIs derive identity and family access on the server"
   assert.match(page, /const session = await auth\(\)/);
   assert.match(page, /<LoginScreen/);
   assert.match(state, /requireFamilyMembership\("read"\)/);
-  assert.match(state, /requireFamilyMembership\("write"\)/);
+  assert.match(state, /assertChildPermission/);
+  assert.match(state, /requireFamilyManager/);
   assert.match(state, /WHERE family_id = \?/);
   assert.doesNotMatch(state, /WHERE id = ['"]family['"]/);
   assert.match(media, /requireFamilyMembership\("read"\)/);

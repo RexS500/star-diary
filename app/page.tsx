@@ -22,14 +22,14 @@ export default async function Home({ searchParams }: HomeProps) {
     name: session.user.name || null,
     image: session.user.image || null,
   };
-  let role: "owner" | "parent" | "viewer";
+  let familyAccess: Awaited<ReturnType<typeof getFamilyForAuthenticatedUser>>;
   try {
-    role = (await getFamilyForAuthenticatedUser(account)).role;
+    familyAccess = await getFamilyForAuthenticatedUser(account);
   } catch (error) {
     if (error instanceof FamilyAccessError) {
       return <AccountAccessError email={account.email} message={error.message}/>;
     }
     throw error;
   }
-  return <StarHome account={{ ...account, role }}/>;
+  return <StarHome account={{ ...account, role: familyAccess.role, boundChildId: familyAccess.boundChildId }}/>;
 }
