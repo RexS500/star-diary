@@ -21,6 +21,7 @@ import {
     validateSecuritySetup,
     verifySecret,
 } from "../../security-logic";
+import { calculateChildStarBalance, reconcileChildStarBalances } from "../../star-balance";
 
 const initial = {
     children: [{ id: "c1", name: "小宇", gender: "boy", avatar: "boy", stars: 0 }],
@@ -219,6 +220,7 @@ function normalizeState(value: unknown): StoredState {
     state.securityLockedUntil = validIso(state.securityLockedUntil) ? state.securityLockedUntil : "";
     state.securityResetTokenHash = typeof state.securityResetTokenHash === "string" ? state.securityResetTokenHash : "";
     state.securityResetTokenExpiresAt = validIso(state.securityResetTokenExpiresAt) ? state.securityResetTokenExpiresAt : "";
+    state.children = reconcileChildStarBalances(state.children, state.entries, state.redemptions);
     return state as StoredState;
 }
 
@@ -366,7 +368,6 @@ function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "
     const entry = { id: crypto.randomUUID(), childId: record.childId, title: `每日任務：${record.titleSnapshot}`, amount: positiveInt(record.rewardStarsSnapshot), type: "star", date: new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), occurredAt: nowIso, createdAt: nowIso, status: "completed", sourceType: "daily_task", sourceId: record.id };
     const child = state.children.find(item => item.id === record.childId);
     if (!child) throw new ApiError("找不到孩子資料", 404);
-    child.stars = Math.max(0, Number(child.stars) || 0) + entry.amount;
     state.entries = [entry, ...state.entries];
     record.status = "completed";
     record.completedAt = nowIso;
@@ -581,9 +582,8 @@ export async function POST(req: Request) {
                     if (record.status !== "completed") return false;
                     const entry = findActiveTaskEntry(state, record), child = state.children.find(item => item.id === record.childId);
                     if (!entry || !child) throw new ApiError("找不到對應的星星紀錄", 409);
-                    const amount = positiveInt(entry.amount);
-                    if ((Number(child.stars) || 0) < amount) throw new ApiError(`目前星星不足以撤銷，請先補回 ${amount - (Number(child.stars) || 0)} 顆`, 409);
-                    child.stars -= amount;
+                    const amount = positiveInt(entry.amount),balance=calculateChildStarBalance(state.entries,state.redemptions,record.childId);
+                    if (balance.total < amount) throw new ApiError(`目前星星不足以撤銷，請先補回 ${amount - balance.total} 顆`, 409);
                     entry.status = "revoked";
                     entry.revokedAt = nowIso;
                     record.status = "pending";

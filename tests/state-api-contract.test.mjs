@@ -66,3 +66,9 @@ test("quick indicator type ordering persists while legacy arrays remain compatib
   assert.match(source,/Number\.isFinite\(Number\(template\.sortOrder\)\)/);
   assert.match(source,/state\.templates = normalizeTemplates\(state\.templates\)/);
 });
+
+test("server reconciles cached child stars from the shared ledger",()=>{
+  assert.match(source,/reconcileChildStarBalances\(state\.children, state\.entries, state\.redemptions\)/);
+  assert.match(source,/calculateChildStarBalance\(state\.entries,state\.redemptions,record\.childId\)/);
+  assert.doesNotMatch(source,/child\.stars\s*[+\-]=/);
+});

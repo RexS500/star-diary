@@ -1,40 +1,20 @@
 import { addCalendarDays, taipeiDateKey } from "./daily-task-logic.ts";
+import {
+    isCompletedStarRedemption,
+    redemptionStarCost,
+    starEntryBalanceLine,
+    type StarBalanceEntryLike,
+    type StarBalanceRedemptionLike,
+} from "./star-balance.ts";
 
 export const ANALYTICS_WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"] as const;
 
 const STAR_COLORS = ["#2563a6", "#1687a7", "#357a5b", "#6d5bd0", "#c08a19", "#4878bd", "#0f8a8a", "#7b67b5", "#5e8c3f", "#9b7622"];
 const DEDUCT_COLORS = ["#b42318", "#c2413a", "#9f322c", "#d05a4e", "#8f2d2a", "#d9685c", "#a6453b", "#c95045"];
 
-export type AnalyticsEntryLike = {
-    id?: string;
-    childId: string;
-    title?: string;
-    amount?: number;
-    type?: string;
-    date?: string;
-    status?: string;
-    sourceType?: string;
-    sourceId?: string;
-    occurredAt?: string;
-    createdAt?: string;
-};
+export type AnalyticsEntryLike = StarBalanceEntryLike & { childId: string; sourceId?: string };
 
-export type AnalyticsRedemptionLike = {
-    id?: string;
-    childId: string;
-    reward?: string;
-    rewardNameSnapshot?: string;
-    cost?: number;
-    costSnapshot?: number;
-    totalCost?: number;
-    quantity?: number;
-    date?: string;
-    status?: string;
-    source?: string;
-    completedAt?: string;
-    createdAt?: string;
-    updatedAt?: string;
-};
+export type AnalyticsRedemptionLike = StarBalanceRedemptionLike & { childId: string };
 
 export type WeekPeriod = {
     key: string;
@@ -175,13 +155,15 @@ export function getWeeklyStarAnalytics(entries: AnalyticsEntryLike[], childId: s
     }]));
     let recordCount = 0;
     for (const entry of entries) {
-        if (entry.childId !== childId || (entry.status ?? "completed") !== "completed") continue;
+        if (entry.childId !== childId) continue;
+        const balanceLine = starEntryBalanceLine(entry);
+        if (!balanceLine.included) continue;
         const category = normalizeRecordCategory(entry);
         if (!category) continue;
         const date = entryAnalyticsDateKey(entry);
         const daily = dailyMaps.get(date);
         if (!daily) continue;
-        const amount = Math.abs(Math.trunc(finiteNumber(entry.amount) ?? 0));
+        const amount = Math.abs(balanceLine.delta);
         if (!amount) continue;
         const target = daily[category.type];
         const current = target.get(category.key) ?? { ...category, amount: 0, count: 0, color: categoryColor(category.key, category.type) };
@@ -229,25 +211,17 @@ function redemptionTimestamp(redemption: AnalyticsRedemptionLike) {
     return Number.NaN;
 }
 
-function validRedemption(redemption: AnalyticsRedemptionLike) {
-    const status = (redemption.status ?? "completed").toLocaleLowerCase();
-    return status === "completed" || status === "redeemed" || status === "fulfilled";
-}
-
 export function getWeeklyRedemptionSummary(redemptions: AnalyticsRedemptionLike[], childId: string, period: WeekPeriod): RedemptionSummaryItem[] {
     const grouped = new Map<string, RedemptionSummaryItem>();
     for (const redemption of redemptions) {
-        if (redemption.childId !== childId || !validRedemption(redemption)) continue;
+        if (redemption.childId !== childId || !isCompletedStarRedemption(redemption)) continue;
         const timestamp = redemptionTimestamp(redemption);
         const date = Number.isFinite(timestamp) ? taipeiDateKey(timestamp) : analyticsDateKey(redemption.date);
         if (!date || date < period.start || date > period.end) continue;
         const name = normalizedText(redemption.rewardNameSnapshot ?? redemption.reward) || "未命名獎品";
         const key = comparisonText(name);
         const quantity = positiveInteger(redemption.quantity, 1);
-        const explicitTotal = finiteNumber(redemption.totalCost);
-        const snapshotCost = finiteNumber(redemption.costSnapshot);
-        const legacyCost = finiteNumber(redemption.cost);
-        const totalCost = Math.max(0, Math.trunc(explicitTotal ?? (snapshotCost === undefined ? (legacyCost ?? 0) : snapshotCost * quantity)));
+        const totalCost = redemptionStarCost(redemption);
         const current = grouped.get(key) ?? { key, name, quantity: 0, totalCost: 0, latestAt: Number.NEGATIVE_INFINITY };
         current.quantity += quantity;
         current.totalCost += totalCost;

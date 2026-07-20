@@ -21,6 +21,7 @@ import {
     type DailyTaskRecord,
     type DailyTaskSettingsMap,
 } from "./daily-task-logic.ts";
+import { isCompletedStarRedemption, isEffectiveStarRecord, redemptionStarCost } from "./star-balance.ts";
 
 export type AnalyticsRangePreset = "two_weeks" | "current_month" | "previous_month" | "last_30_days" | "custom" | "all";
 
@@ -226,14 +227,9 @@ function redemptionTimestamp(item: AnalyticsRedemptionLike) {
     return Number.NaN;
 }
 
-function completedRedemption(item: AnalyticsRedemptionLike) {
-    const status = String(item.status ?? "completed").toLocaleLowerCase();
-    return status === "completed" || status === "redeemed" || status === "fulfilled";
-}
-
 function redemptionStatus(item: AnalyticsRedemptionLike) {
+    if (isCompletedStarRedemption(item)) return "已完成";
     const status = String(item.status ?? "completed").toLocaleLowerCase();
-    if (status === "completed" || status === "redeemed" || status === "fulfilled") return "已完成";
     if (status === "pending") return "等待家長確認";
     if (status === "cancelled") return "已取消";
     if (status === "rejected") return "已拒絕";
@@ -286,7 +282,7 @@ export function buildAnalyticsReport(input: {
     const period = analyticsPeriod(input.range);
     const starAnalysis = getWeeklyStarAnalytics(input.entries, input.childId, period, input.todayKey);
     const entries = input.entries
-        .filter(item => item.childId === input.childId && (item.status ?? "completed") === "completed")
+        .filter(item => item.childId === input.childId && isEffectiveStarRecord(item))
         .filter(item => {
             const date = entryAnalyticsDateKey(item);
             return date >= input.range.start && date <= input.range.end;
@@ -372,15 +368,14 @@ export function buildAnalyticsReport(input: {
             const quantity = Math.max(1, finiteInteger(item.quantity) || 1);
             const snapshotCost = Number(item.costSnapshot);
             const legacyCost = Number(item.cost);
-            const explicitTotal = Number(item.totalCost);
             const unitCost = Math.max(0, Math.trunc(Number.isFinite(snapshotCost) ? snapshotCost : Number.isFinite(legacyCost) ? legacyCost : 0));
-            const plannedTotal = Math.max(0, Math.trunc(Number.isFinite(explicitTotal) ? explicitTotal : unitCost * quantity));
+            const plannedTotal = redemptionStarCost(item);
             return {
                 redeemedAt: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : String(item.date ?? ""),
                 rewardName: String(item.rewardNameSnapshot ?? item.reward ?? "未命名獎品").trim() || "未命名獎品",
                 quantity,
                 unitCost,
-                totalCost: completedRedemption(item) ? plannedTotal : 0,
+                totalCost: isCompletedStarRedemption(item) ? plannedTotal : 0,
                 status: redemptionStatus(item),
             };
         });

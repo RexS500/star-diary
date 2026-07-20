@@ -155,6 +155,20 @@ test("range analytics share real child records across both modes and responsive 
   assert.match(css, /\.mobile-redemption-cards/);
 });
 
+test("home, rewards and debug mode use the shared ledger balance", async () => {
+  const [home,balance] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/star-balance.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(home,/calculateChildStarBalance\(data\.entries,data\.redemptions,child\.id\)/);
+  assert.match(home,/我的星星[\s\S]*childBalance\.total/);
+  assert.match(home,/目前有 <b>\{childBalance\.total\}/);
+  assert.match(home,/debugStars/);
+  assert.match(balance,/Reduce Total = \$\{report\.total\}/);
+  assert.match(balance,/首頁目前顯示 = \$\{displayedTotal\}/);
+  assert.match(balance,/是否納入計算/);
+});
+
 test("daily task settings expose shared child applicability controls", async () => {
   const [home, css] = await Promise.all([
     readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),

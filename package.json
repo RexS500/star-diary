@@ -10,7 +10,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "node --experimental-strip-types --test tests/rendered-html.test.mjs tests/daily-task-logic.test.mjs tests/settings-draft.test.mjs tests/analytics-logic.test.mjs tests/analytics-report.test.mjs tests/excel-export.test.mjs tests/record-time.test.mjs tests/security-logic.test.mjs tests/state-api-contract.test.mjs tests/integer-input-logic.test.mjs tests/official-task-library.test.mjs tests/quick-template-logic.test.mjs tests/weekday-selection.test.mjs tests/pwa.test.mjs",
+    "test": "node --experimental-strip-types --test tests/rendered-html.test.mjs tests/daily-task-logic.test.mjs tests/settings-draft.test.mjs tests/analytics-logic.test.mjs tests/analytics-report.test.mjs tests/excel-export.test.mjs tests/record-time.test.mjs tests/security-logic.test.mjs tests/state-api-contract.test.mjs tests/integer-input-logic.test.mjs tests/official-task-library.test.mjs tests/quick-template-logic.test.mjs tests/weekday-selection.test.mjs tests/pwa.test.mjs tests/star-balance.test.mjs",
     "verify": "npm run lint && npm run test && npm run build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
