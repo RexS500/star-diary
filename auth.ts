@@ -2,6 +2,7 @@ import { D1Adapter } from "@auth/d1-adapter";
 import { env } from "cloudflare:workers";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import { recordLogin } from "./app/operations-telemetry";
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   adapter: D1Adapter(env.DB),
@@ -34,6 +35,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       } catch {
         return baseUrl;
       }
+    },
+  },
+  events: {
+    async signIn({ user }) {
+      if (user.id) await recordLogin(user.id);
     },
   },
 });

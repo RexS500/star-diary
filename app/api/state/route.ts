@@ -31,6 +31,12 @@ import {
     type FamilyAccess,
     type MemberChildPermission,
 } from "../../family-access";
+import {
+    recordFamilyStateDiff,
+    recordOperationalError,
+    recordOperationalEvent,
+    requestTraceId,
+} from "../../operations-telemetry";
 
 const initial = {
     children: [],
@@ -454,9 +460,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+    let traceFamilyId: string | null = null;
+    let traceUserId: string | null = null;
     try {
         const family = await requireFamilyMembership("read");
         const { familyId } = family;
+        traceFamilyId = familyId;
+        traceUserId = family.user.id;
         const permissions = await getMemberChildPermissions(family);
         const body = await req.json() as {
             action: string;
@@ -622,6 +632,27 @@ export async function POST(req: Request) {
                 }
                 return completeDailyTask(state, record, "child");
             });
+            const completedRecord = result.state.dailyTaskRecords.find(item => item.id === body.recordId);
+            if (completedRecord?.status === "completed") {
+                await recordOperationalEvent({
+                    eventType: "daily_task_completed",
+                    familyId,
+                    userId: family.user.id,
+                    source: "child",
+                    dedupeKey: `state-daily-task:${familyId}:${completedRecord.id}:completed`,
+                    occurredAt: completedRecord.completedAt,
+                });
+                const rewardEntry = result.state.entries.find(entry => entry.id === completedRecord.rewardEntryId);
+                if (rewardEntry) await recordOperationalEvent({
+                    eventType: "star_add",
+                    familyId,
+                    userId: family.user.id,
+                    amount: positiveInt(rewardEntry.amount),
+                    source: "daily_task",
+                    dedupeKey: `state-entry:${familyId}:${rewardEntry.id}:completed`,
+                    occurredAt: rewardEntry.occurredAt,
+                });
+            }
             return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
@@ -669,6 +700,29 @@ export async function POST(req: Request) {
                 }
                 throw new ApiError("不支援的任務操作", 400);
             });
+            if (body.operation === "complete" || body.operation === "approve") {
+                const completedRecord = result.state.dailyTaskRecords.find(item => item.id === body.recordId);
+                if (completedRecord?.status === "completed") {
+                    await recordOperationalEvent({
+                        eventType: "daily_task_completed",
+                        familyId,
+                        userId: family.user.id,
+                        source: "parent",
+                        dedupeKey: `state-daily-task:${familyId}:${completedRecord.id}:completed`,
+                        occurredAt: completedRecord.completedAt,
+                    });
+                    const rewardEntry = result.state.entries.find(entry => entry.id === completedRecord.rewardEntryId);
+                    if (rewardEntry) await recordOperationalEvent({
+                        eventType: "star_add",
+                        familyId,
+                        userId: family.user.id,
+                        amount: positiveInt(rewardEntry.amount),
+                        source: "daily_task",
+                        dedupeKey: `state-entry:${familyId}:${rewardEntry.id}:completed`,
+                        occurredAt: rewardEntry.occurredAt,
+                    });
+                }
+            }
             return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
@@ -730,9 +784,27 @@ export async function POST(req: Request) {
         next.dailyTasks = prepareTaskDefinitionsForSave(current.state.dailyTasks, next.dailyTasks);
         reconcileTodayPendingRecords(next);
         const saved = await writeState(next, current.revision, familyId);
+        await recordFamilyStateDiff({
+            before: current.state,
+            after: saved.state,
+            familyId,
+            userId: family.user.id,
+        });
         return Response.json(accessPayload(saved.state, saved.revision, family, permissions));
     } catch (error) {
         if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);
+        if (!(error instanceof ApiError) || error.status >= 500) {
+            await recordOperationalError({
+                category: "state_api_error",
+                error,
+                route: "/api/state",
+                method: "POST",
+                statusCode: error instanceof ApiError ? error.status : 500,
+                familyId: traceFamilyId,
+                userId: traceUserId,
+                requestId: requestTraceId(req),
+            });
+        }
         return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof ApiError ? error.status : 500 });
     }
 }

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { FamilyAccess } from "./family-access";
+import { recordOperationalEvent } from "./operations-telemetry";
 import {
   familyMediaKeysForDeletion,
   forceDeleteConfirmationValid,
@@ -811,6 +812,13 @@ export async function acceptFamilyInvitation(
     }
     throw error;
   }
+  await recordOperationalEvent({
+    eventType: "member_created",
+    familyId: row.family_id,
+    userId: user.id,
+    source: row.role,
+    dedupeKey: `member_created:${row.family_id}:${user.id}`,
+  });
   return {
     familyId: row.family_id,
     familyName: row.family_name,

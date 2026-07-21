@@ -12,6 +12,7 @@ import {
   stateReferencesMediaKey,
   type MediaKind,
 } from "../../media-scope";
+import { recordOperationalError, recordOperationalEvent, requestTraceId } from "../../operations-telemetry";
 
 type FamilyStateRow = { data: string };
 type MediaRow = { family_id: string };
@@ -58,20 +59,30 @@ export async function POST(req: Request) {
     try {
       await env.DB.prepare(
         `INSERT INTO media_objects
-           (family_id, object_key, kind, created_by_user_id, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+           (family_id, object_key, kind, created_by_user_id, created_at, size_bytes, content_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         family.familyId,
         uploadedKey,
         kind,
         family.user.id,
         new Date().toISOString(),
+        file.size,
+        file.type || "image/jpeg",
       ).run();
     } catch (error) {
       await env.MEDIA.delete(uploadedKey).catch(() => undefined);
       uploadedKey = "";
       throw error;
     }
+    await recordOperationalEvent({
+      eventType: "image_uploaded",
+      familyId: family.familyId,
+      userId: family.user.id,
+      amount: file.size,
+      source: kind,
+      dedupeKey: `image_uploaded:${uploadedKey}`,
+    });
     return Response.json(
       { url: `/api/media?key=${encodeURIComponent(uploadedKey)}&v=${Date.now()}` },
       { headers: privateHeaders },
@@ -79,6 +90,14 @@ export async function POST(req: Request) {
   } catch (error) {
     if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);
     if (uploadedKey) await env.MEDIA.delete(uploadedKey).catch(() => undefined);
+    await recordOperationalError({
+      category: "image_upload_failed",
+      error,
+      route: "/api/media",
+      method: "POST",
+      statusCode: 500,
+      requestId: requestTraceId(req),
+    });
     return Response.json(
       { error: "圖片上傳失敗，請稍後再試" },
       { status: 500, headers: privateHeaders },

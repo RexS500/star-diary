@@ -9,6 +9,13 @@ export const users = sqliteTable("users", {
   email: text("email"),
   emailVerified: text("emailVerified"),
   image: text("image"),
+  createdAt: text("created_at"),
+  lastLoginAt: text("last_login_at"),
+  loginCount: integer("login_count").notNull().default(0),
+  status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
+  disabledAt: text("disabled_at"),
+  disabledByUserId: text("disabled_by_user_id"),
+  disabledReason: text("disabled_reason"),
 }, table => [uniqueIndex("users_email_unique").on(table.email)]);
 
 export const accounts = sqliteTable("accounts", {
@@ -55,6 +62,13 @@ export const families = sqliteTable("families", {
   claimedAt: text("claimed_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+  createdByUserId: text("created_by_user_id"),
+  lastActivityAt: text("last_activity_at"),
+  status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
+  isTest: integer("is_test", { mode: "boolean" }).notNull().default(false),
+  disabledAt: text("disabled_at"),
+  disabledByUserId: text("disabled_by_user_id"),
+  disabledReason: text("disabled_reason"),
 });
 
 export const familyMembers = sqliteTable("family_members", {
@@ -123,6 +137,8 @@ export const mediaObjects = sqliteTable("media_objects", {
   kind: text("kind", { enum: ["avatars", "rewards"] }).notNull(),
   createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
   createdAt: text("created_at").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  contentType: text("content_type"),
 }, table => [
   primaryKey({ columns: [table.familyId, table.objectKey] }),
   index("media_objects_key_idx").on(table.objectKey),
@@ -151,6 +167,98 @@ export const appMigrations = sqliteTable("app_migrations", {
   version: text("version").primaryKey().notNull(),
   appliedAt: text("applied_at").notNull(),
 });
+
+export const userDailyActivity = sqliteTable("user_daily_activity", {
+  activityDate: text("activity_date").notNull(),
+  userId: text("user_id").notNull(),
+  firstSeenAt: text("first_seen_at").notNull(),
+  lastSeenAt: text("last_seen_at").notNull(),
+  requestCount: integer("request_count").notNull().default(1),
+}, table => [
+  primaryKey({ columns: [table.activityDate, table.userId] }),
+  index("user_daily_activity_user_idx").on(table.userId, table.activityDate),
+]);
+
+export const featureUsageEvents = sqliteTable("feature_usage_events", {
+  id: text("id").primaryKey().notNull(),
+  eventType: text("event_type").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+  dayKey: text("day_key").notNull(),
+  familyId: text("family_id"),
+  userId: text("user_id"),
+  amount: integer("amount"),
+  quantity: integer("quantity").notNull().default(1),
+  source: text("source"),
+  dedupeKey: text("dedupe_key"),
+  metadataJson: text("metadata_json"),
+}, table => [
+  index("feature_usage_events_day_type_idx").on(table.dayKey, table.eventType),
+  index("feature_usage_events_family_day_idx").on(table.familyId, table.dayKey),
+  uniqueIndex("feature_usage_events_dedupe_unique").on(table.dedupeKey),
+]);
+
+export const systemErrorLogs = sqliteTable("system_error_logs", {
+  id: text("id").primaryKey().notNull(),
+  category: text("category").notNull(),
+  errorCode: text("error_code"),
+  message: text("message").notNull(),
+  route: text("route"),
+  method: text("method"),
+  statusCode: integer("status_code"),
+  familyId: text("family_id"),
+  userId: text("user_id"),
+  requestId: text("request_id"),
+  metadataJson: text("metadata_json"),
+  occurredAt: text("occurred_at").notNull(),
+  resolvedAt: text("resolved_at"),
+}, table => [
+  index("system_error_logs_time_idx").on(table.occurredAt),
+  index("system_error_logs_category_idx").on(table.category, table.occurredAt),
+]);
+
+export const adminAuditLogs = sqliteTable("admin_audit_logs", {
+  id: text("id").primaryKey().notNull(),
+  adminUserId: text("admin_user_id").notNull(),
+  actionType: text("action_type").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id").notNull(),
+  beforeData: text("before_data"),
+  afterData: text("after_data"),
+  reason: text("reason").notNull(),
+  createdAt: text("created_at").notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  requestId: text("request_id"),
+  resultStatus: text("result_status").notNull().default("success"),
+}, table => [
+  index("admin_audit_logs_created_idx").on(table.createdAt),
+  index("admin_audit_logs_target_idx").on(table.targetType, table.targetId),
+]);
+
+export const supportAccessGrants = sqliteTable("support_access_grants", {
+  id: text("id").primaryKey().notNull(),
+  familyId: text("family_id").notNull(),
+  grantedByUserId: text("granted_by_user_id").notNull(),
+  grantedToAdminUserId: text("granted_to_admin_user_id").notNull(),
+  reason: text("reason").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  revokedAt: text("revoked_at"),
+}, table => [
+  index("support_access_grants_family_idx").on(table.familyId, table.expiresAt),
+]);
+
+export const resourceMetricSnapshots = sqliteTable("resource_metric_snapshots", {
+  id: text("id").primaryKey().notNull(),
+  capturedAt: text("captured_at").notNull(),
+  dayKey: text("day_key").notNull(),
+  metricName: text("metric_name").notNull(),
+  metricValue: integer("metric_value").notNull(),
+  source: text("source").notNull().default("application"),
+  metadataJson: text("metadata_json"),
+}, table => [
+  index("resource_metric_snapshots_day_idx").on(table.dayKey, table.metricName),
+]);
 
 // Preserved only for rollback and legacy-data copy. New application requests
 // never read or write this table after migration 0002.

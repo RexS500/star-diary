@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import type { Session } from "next-auth";
 import { auth } from "../auth";
+import { recordUserActivity } from "./operations-telemetry";
 
 export type FamilyRole = "owner" | "parent" | "child";
 export type ChildAccountMode = "personal" | "shared";
@@ -66,7 +67,10 @@ async function membershipForUser(userId: string) {
     `SELECT fm.family_id, f.name AS family_name, fm.role, fm.child_id, fm.child_account_mode
       FROM family_members fm
        JOIN families f ON f.id = fm.family_id
+       JOIN users u ON u.id = fm.user_id
       WHERE fm.user_id = ? AND fm.status = 'active'
+        AND COALESCE(f.status, 'active') = 'active'
+        AND COALESCE(u.status, 'active') = 'active'
       ORDER BY CASE fm.role WHEN 'owner' THEN 0 WHEN 'parent' THEN 1 ELSE 2 END,
                fm.created_at ASC
       LIMIT 1`,
@@ -171,6 +175,7 @@ export async function requireFamilyMembership(
   if (access === "write" && !WRITE_ROLES.has(family.role)) {
     throw new FamilyAccessError("目前帳號沒有修改家庭資料的權限", 403);
   }
+  await recordUserActivity(family.user.id, family.familyId);
   return family;
 }
 

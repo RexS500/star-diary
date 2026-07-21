@@ -665,6 +665,7 @@ function Analytics({data,child,onRefresh,todayKey}:{data:State;child:Child;onRef
             const latestReport=buildAnalyticsReport({childId:latestChild.id,childName:latestChild.name,range:latestRange,todayKey,entries:latest.entries,redemptions:latest.redemptions,templates:latest.templates,dailyTasks:latest.dailyTasks,dailyTaskRecords:latest.dailyTaskRecords,dailyTaskSettings:latest.dailyTaskSettings});
             const workbook=buildAnalyticsWorkbook(latestReport),url=URL.createObjectURL(new Blob([workbook],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})),link=document.createElement("a");
             link.href=url;link.download=`星星日記_${latestChild.name.replace(/[\\/:*?"<>|]/g,"_")}_${latestRange.start}_至_${latestRange.end}.xlsx`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);updateTime();
+            void fetch("/api/telemetry",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({eventType:"excel_exported",dedupeKey:`excel:${crypto.randomUUID()}`})}).catch(()=>undefined);
         }finally{setExporting(false)}
     }
     return <div className="analytics weekly-analytics">

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { DEFAULT_DAILY_TASK_SETTINGS } from "./daily-task-logic";
 import { findFamilyForAuthenticatedUser, type FamilyAccess } from "./family-access";
+import { recordOperationalEvent } from "./operations-telemetry";
 
 export class FamilyOnboardingError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -45,8 +46,11 @@ export async function createFamilyAndOwner(user: FamilyAccess["user"], input: Cr
   try {
     const results = await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO families (id, name, legacy_state, created_at, updated_at) VALUES (?, ?, 0, ?, ?)",
-      ).bind(familyId, familyName, now, now),
+        `INSERT INTO families
+           (id, name, legacy_state, created_at, updated_at,
+            created_by_user_id, last_activity_at, status, is_test)
+         VALUES (?, ?, 0, ?, ?, ?, ?, 'active', 0)`,
+      ).bind(familyId, familyName, now, now, user.id, now),
       env.DB.prepare(
         `INSERT INTO family_members
            (family_id, user_id, role, child_id, child_account_mode, created_at, updated_at, status)
@@ -64,6 +68,21 @@ export async function createFamilyAndOwner(user: FamilyAccess["user"], input: Cr
     }
     throw new FamilyOnboardingError("建立家庭失敗，請檢查網路後再試。", 500);
   }
+  await Promise.all([
+    recordOperationalEvent({
+      eventType: "family_created",
+      familyId,
+      userId: user.id,
+      dedupeKey: `family_created:${familyId}`,
+    }),
+    recordOperationalEvent({
+      eventType: "member_created",
+      familyId,
+      userId: user.id,
+      source: "owner",
+      dedupeKey: `member_created:${familyId}:${user.id}`,
+    }),
+  ]);
   return { familyId, childId, familyName };
 }
 

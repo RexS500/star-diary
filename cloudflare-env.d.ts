@@ -47,5 +47,6 @@ declare module "cloudflare:workers" {
     AUTH_GOOGLE_ID: string;
     AUTH_GOOGLE_SECRET: string;
     INITIAL_OWNER_EMAIL: string;
+    ADMIN_EMAILS: string;
   };
 }
