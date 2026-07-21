@@ -1,9 +1,9 @@
-import { requireAdmin } from "../../admin-auth";
+import { getOptionalAdmin } from "../../admin-auth";
 import { getAdminAuditLogs } from "../../admin-service";
 import { AdminPageHeader, AdminTable, statusBadge } from "../admin-ui";
 
 export default async function AdminAuditPage() {
-  await requireAdmin();
+  if (!await getOptionalAdmin()) return null;
   const logs = await getAdminAuditLogs();
   return <>
     <AdminPageHeader eyebrow="ADMIN AUDIT" title="管理員稽核紀錄" description="所有高風險操作都必須附理由並永久留下操作者、目標、時間與結果。"/>

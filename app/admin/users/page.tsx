@@ -1,9 +1,9 @@
-import { requireAdmin } from "../../admin-auth";
+import { getOptionalAdmin } from "../../admin-auth";
 import { getAdminUsers } from "../../admin-service";
 import { AdminPageHeader, AdminTable, statusBadge } from "../admin-ui";
 
 export default async function AdminUsersPage() {
-  await requireAdmin();
+  if (!await getOptionalAdmin()) return null;
   const users = await getAdminUsers();
   return <>
     <AdminPageHeader eyebrow="USER MANAGEMENT" title="使用者管理" description="檢視 Google 帳號、家庭角色與登入活動；不提供直接修改私人家庭內容的功能。"/>

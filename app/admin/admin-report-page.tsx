@@ -1,4 +1,4 @@
-import { requireAdmin } from "../admin-auth";
+import { getOptionalAdmin } from "../admin-auth";
 import { getAdminReport, normalizeAdminRange, type AdminReportKind } from "../admin-service";
 import { AdminBars, AdminMetric, AdminPageHeader, AdminRangeForm, AdminTable, formatBytes, formatNumber } from "./admin-ui";
 
@@ -20,7 +20,7 @@ const eventLabels: Record<string, string> = {
 };
 
 export async function AdminReportPage({ kind, searchParams }: { kind: AdminReportKind; searchParams?: ReportSearchParams }) {
-  await requireAdmin();
+  if (!await getOptionalAdmin()) return null;
   const params = await searchParams;
   const range = normalizeAdminRange(params?.start, params?.end);
   const report = await getAdminReport(kind, range) as Record<string, unknown>;

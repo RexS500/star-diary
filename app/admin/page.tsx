@@ -1,9 +1,9 @@
-import { requireAdmin } from "../admin-auth";
+import { getOptionalAdmin } from "../admin-auth";
 import { getAdminOverview } from "../admin-service";
 import { AdminMetric, AdminPageHeader, AdminTable, formatBytes, formatNumber } from "./admin-ui";
 
 export default async function AdminOverviewPage() {
-  await requireAdmin();
+  if (!await getOptionalAdmin()) return null;
   const data = await getAdminOverview();
   const metrics = [
     ["總家庭數", data.totals.families, "blue"],

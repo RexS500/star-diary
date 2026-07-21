@@ -1,9 +1,9 @@
-import { requireAdmin } from "../../admin-auth";
+import { getOptionalAdmin } from "../../admin-auth";
 import { getAdminFamilies } from "../../admin-service";
 import { AdminPageHeader, AdminTable, formatBytes, statusBadge } from "../admin-ui";
 
 export default async function AdminFamiliesPage() {
-  await requireAdmin();
+  if (!await getOptionalAdmin()) return null;
   const families = await getAdminFamilies();
   return <>
     <AdminPageHeader eyebrow="FAMILY MANAGEMENT" title="家庭管理" description="只顯示營運所需的家庭摘要，不在列表揭露孩子姓名、照片或私人任務內容。"/>

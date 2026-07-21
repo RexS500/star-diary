@@ -1,16 +1,12 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { requireAdmin } from "../admin-auth";
+import { getOptionalAdmin } from "../admin-auth";
 import { adminNavItems } from "./admin-ui";
 
 export const dynamic = "force-dynamic";
 
-async function adminOrNull() {
-  try { return await requireAdmin(); } catch { return null; }
-}
-
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  const admin = await adminOrNull();
+  const admin = await getOptionalAdmin();
   if (admin) return <div className="admin-shell">
       <header className="admin-topbar">
         <Link className="admin-brand" href="/admin"><span aria-hidden="true">⭐</span><span><strong>星星日記</strong><small>營運管理中心</small></span></Link>

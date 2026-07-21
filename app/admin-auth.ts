@@ -43,6 +43,10 @@ export async function requireAdmin(): Promise<AdminIdentity> {
   return user;
 }
 
+export async function getOptionalAdmin() {
+  try { return await requireAdmin(); } catch { return null; }
+}
+
 export function adminErrorResponse(error: unknown) {
   const status = error instanceof AdminAccessError ? error.status : 500;
   const message = error instanceof AdminAccessError

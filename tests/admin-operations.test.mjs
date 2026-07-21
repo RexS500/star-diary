@@ -15,7 +15,7 @@ test("admin access is a server-side secret allowlist", async () => {
   assert.match(auth, /requireAuthenticatedUser\(\)/);
   assert.match(auth, /configured\.has/);
   assert.doesNotMatch(auth, /rexshih0706@gmail\.com/);
-  assert.match(layout, /await requireAdmin\(\)/);
+  assert.match(layout, /await getOptionalAdmin\(\)/);
   assert.match(overviewApi, /await requireAdmin\(\)/);
 });
 
