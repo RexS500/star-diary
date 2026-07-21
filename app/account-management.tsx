@@ -1,7 +1,8 @@
 "use client";
 
 import { signOut } from "next-auth/react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { APP_DATA_REFRESH_EVENT, type AppDataRefreshDetail } from "./app-refresh";
 import {
   canRemoveFamilyMember,
   effectiveInvitationStatus,
@@ -102,7 +103,7 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
   const [permissionPreset, setPermissionPreset] = useState<PermissionPreset>("only_self");
   const [customPermissions, setCustomPermissions] = useState<ChildPermission[]>([]);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -112,28 +113,28 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
       setSnapshot(result);
       setInviteChildId(current => current || result.children[0]?.id || "");
       setInvitePermissions(current => current.length ? current : normalizeChildPermissions({ childIds: result.children.map(child => child.id), boundChildId: null, preset: "share_all" }));
+      return true;
     } catch (value) {
       setError(value instanceof Error ? value.message : "無法讀取帳號資料");
+      return false;
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    void fetch(`/api/account?t=${Date.now()}`, { cache: "no-store" })
-      .then(async response => {
-        const result = await response.json() as AccountSnapshot & { error?: string };
-        if (!response.ok) throw new Error(result.error || "無法讀取帳號資料");
-        if (!active) return;
-        setSnapshot(result);
-        setInviteChildId(result.children[0]?.id || "");
-        setInvitePermissions(normalizeChildPermissions({ childIds: result.children.map(child => child.id), boundChildId: null, preset: "share_all" }));
-      })
-      .catch(value => { if (active) setError(value instanceof Error ? value.message : "無法讀取帳號資料"); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => { window.clearTimeout(timer); };
+  }, [load]);
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const detail = (event as CustomEvent<AppDataRefreshDetail>).detail;
+      const task = load();
+      if (detail?.tasks) detail.tasks.push(task);
+    };
+    window.addEventListener(APP_DATA_REFRESH_EVENT, refresh);
+    return () => window.removeEventListener(APP_DATA_REFRESH_EVENT, refresh);
+  }, [load]);
   useEffect(() => {
     const initial = window.setTimeout(() => setClock(Date.now()), 0);
     const timer = window.setInterval(() => setClock(Date.now()), 1000);

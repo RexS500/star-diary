@@ -41,10 +41,8 @@ test("Google Auth.js uses database sessions and the official D1 adapter", async 
 
 test("PWA never serves cached private state after logout or account switches", async () => {
   const sw = await read("public/sw.js");
-  assert.match(sw, /star-diary-pwa-v3-auth/);
-  assert.match(sw, /pathname\.startsWith\("\/api\/auth"\)/);
-  assert.match(sw, /pathname === "\/api\/state"/);
-  assert.match(sw, /pathname\.startsWith\("\/api\/media"\)/);
+  assert.match(sw, /star-diary-pwa-v4-refresh/);
+  assert.match(sw, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(sw, /cache: "no-store"/);
   assert.doesNotMatch(sw, /DATA_CACHE/);
 });

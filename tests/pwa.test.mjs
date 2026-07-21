@@ -44,11 +44,9 @@ test("Apple and browser assets are generated from the project logo at valid size
 
 test("service worker caches the shell while protecting live state and version checks", async () => {
   const sw = await readFile(new URL("public/sw.js", root), "utf8");
-  assert.match(sw, /CACHE_PREFIX = "star-diary-pwa-v3-auth"/);
+  assert.match(sw, /CACHE_PREFIX = "star-diary-pwa-v4-refresh"/);
   assert.match(sw, /request\.method !== "GET"/);
-  assert.match(sw, /url\.pathname === "\/api\/state"/);
-  assert.match(sw, /url\.pathname\.startsWith\("\/api\/auth"\)/);
-  assert.match(sw, /url\.pathname\.startsWith\("\/api\/media"\)/);
+  assert.match(sw, /url\.pathname\.startsWith\("\/api\/"\)/);
   assert.doesNotMatch(sw, /DATA_CACHE|cache\.put\(request.*api\/state/);
   assert.match(sw, /url\.pathname === "\/api\/version"/);
   assert.match(sw, /cache: "no-store"/);
@@ -78,7 +76,9 @@ test("PWA metadata, installation guidance and automatic version checks are wired
   assert.match(layout, /<PwaManager\/>/);
   assert.match(manager, /beforeinstallprompt/);
   assert.match(manager, /加入 iPhone 主畫面/);
-  assert.match(manager, /星星日記已更新/);
+  assert.match(manager, /星星日記有新版本/);
+  assert.match(manager, /updateReloadRequestedRef/);
+  assert.match(manager, /立即更新/);
   assert.match(manager, /Version \{__STAR_DIARY_VERSION__\}/);
   assert.match(manager, /serviceWorker\.register/);
   assert.match(manager, /pwa-launch-splash/);

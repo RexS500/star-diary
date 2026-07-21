@@ -2,6 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { inviteCallbackPath } from "../../auth-intent";
 
 type InvitationView = {
   familyName: string;
@@ -31,7 +32,7 @@ export function InviteJoinClient({
   const [error, setError] = useState("");
   const accepted = useRef(false);
   const expired = remaining <= 0;
-  const callbackUrl = useMemo(() => `/join/${token}`, [token]);
+  const callbackUrl = useMemo(() => inviteCallbackPath(token), [token]);
 
   useEffect(() => {
     const update = () => setRemaining(Date.parse(invitation.expiresAt) - Date.now());

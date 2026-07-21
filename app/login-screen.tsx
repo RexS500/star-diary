@@ -2,6 +2,7 @@
 
 import { signIn, signOut } from "next-auth/react";
 import { useState } from "react";
+import { authCallbackPath } from "./auth-intent";
 
 const ERROR_MESSAGES: Record<string, string> = {
   AccessDenied: "此 Google 帳號目前無法登入。",
@@ -13,29 +14,41 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 export function LoginScreen({ errorCode = "" }: { errorCode?: string }) {
-  const [busy, setBusy] = useState(false);
-  const error = errorCode ? ERROR_MESSAGES[errorCode] || "Google 登入失敗，請重新嘗試。" : "";
+  const [busy, setBusy] = useState<"create_family" | "sign_in" | "">("");
+  const [localError, setLocalError] = useState("");
+  const error = localError || (errorCode ? ERROR_MESSAGES[errorCode] || "Google 登入失敗，請重新嘗試。" : "");
+  function googleLogin(intent: "create_family" | "sign_in") {
+    setLocalError("");
+    setBusy(intent);
+    void signIn("google", { callbackUrl: authCallbackPath(intent) }, { prompt: "select_account" })
+      .catch(() => {
+        setBusy("");
+        setLocalError("Google 登入失敗，請檢查網路後再試一次。");
+      });
+  }
   return <main className="account-login-page">
     <section className="account-login-card" aria-labelledby="account-login-title">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/star-diary-logo.jpg" alt="" width={112} height={112}/>
       <p className="eyebrow">FAMILY STAR JOURNAL</p>
       <h1 id="account-login-title">星星日記</h1>
-      <p>使用 Google 帳號登入，安全保存家庭紀錄；不同家庭的孩子、星星與照片彼此隔離。</p>
+      <p>使用 Google 帳號安全保存家庭的任務、星星與獎勵紀錄。</p>
       {error && <p className="account-login-error" role="alert">{error}</p>}
-      <button
-        type="button"
-        className="google-login-button"
-        disabled={busy}
-        onClick={() => {
-          setBusy(true);
-          void signIn("google", { callbackUrl: "/" }, { prompt: "select_account" }).catch(() => setBusy(false));
-        }}
-      >
-        <span aria-hidden="true">G</span>
-        {busy ? "正在前往 Google…" : "使用 Google 帳號登入"}
-      </button>
-      <small>登入後可在其他手機或電腦繼續使用同一個家庭。</small>
+      <div className="login-choice-grid">
+        <section className="login-choice login-choice-new">
+          <span aria-hidden="true">✨</span>
+          <h2>第一次使用星星日記？</h2>
+          <p>使用 Google 帳號建立新的家庭，建立者會成為 Owner，之後可以邀請其他家長與孩子。</p>
+          <button type="button" className="google-login-button" disabled={Boolean(busy)} onClick={() => googleLogin("create_family")}><b aria-hidden="true">G</b>{busy === "create_family" ? "正在前往 Google…" : "建立新的星星日記家庭"}</button>
+        </section>
+        <section className="login-choice">
+          <span aria-hidden="true">👨‍👩‍👧‍👦</span>
+          <h2>已經是家庭成員？</h2>
+          <p>使用原本加入家庭的 Google 帳號登入。若帳號尚未加入家庭，系統不會自動建立空白家庭。</p>
+          <button type="button" className="google-login-button secondary-google" disabled={Boolean(busy)} onClick={() => googleLogin("sign_in")}><b aria-hidden="true">G</b>{busy === "sign_in" ? "正在前往 Google…" : "登入既有家庭"}</button>
+        </section>
+      </div>
+      <aside className="login-invite-help"><strong>收到家庭邀請？</strong><span>請直接開啟家長傳給你的邀請網址，並在 10 分鐘內使用 Google 帳號登入。</span></aside>
     </section>
   </main>;
 }

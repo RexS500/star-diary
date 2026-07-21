@@ -28,8 +28,10 @@ export function PwaManager() {
   const [installEvent,setInstallEvent]=useState<BeforeInstallPromptEvent|null>(null);
   const [showIosHelp,setShowIosHelp]=useState(false);
   const [updateAvailable,setUpdateAvailable]=useState(false);
+  const [updateError,setUpdateError]=useState("");
   const registrationRef=useRef<ServiceWorkerRegistration|null>(null);
   const reloadingRef=useRef(false);
+  const updateReloadRequestedRef=useRef(false);
 
   useEffect(()=>{
     let frame=0;
@@ -60,7 +62,12 @@ export function PwaManager() {
 
     if(!("serviceWorker" in navigator))return()=>{window.removeEventListener("beforeinstallprompt",beforeInstall);window.removeEventListener("appinstalled",installed)};
 
-    const controllerChanged=()=>{if(reloadingRef.current)return;reloadingRef.current=true;window.location.reload()};
+    const controllerChanged=()=>{
+      if(!updateReloadRequestedRef.current){setUpdateAvailable(true);return}
+      if(reloadingRef.current)return;
+      reloadingRef.current=true;
+      window.location.reload();
+    };
     navigator.serviceWorker.addEventListener("controllerchange",controllerChanged);
 
     const inspectRegistration=(registration:ServiceWorkerRegistration)=>{
@@ -71,7 +78,7 @@ export function PwaManager() {
         worker?.addEventListener("statechange",()=>{if(worker.state==="installed"&&navigator.serviceWorker.controller)setUpdateAvailable(true)});
       });
     };
-    const register=()=>navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(__STAR_DIARY_BUILD_ID__)}`,{scope:"/"}).then(inspectRegistration).catch(()=>undefined);
+    const register=()=>navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(__STAR_DIARY_BUILD_ID__)}`,{scope:"/"}).then(inspectRegistration).catch(()=>setUpdateError("暫時無法檢查 App 更新，請確認網路後再試。"));
     if(document.readyState==="complete")void register();else window.addEventListener("load",register,{once:true});
 
     const checkVersion=()=>fetch("/api/version",{cache:"no-store",headers:{"cache-control":"no-cache"}}).then(response=>response.ok?response.json():null).then(value=>{if(value?.version&&value.version!==__STAR_DIARY_VERSION__)setUpdateAvailable(true)}).catch(()=>undefined);
@@ -92,7 +99,20 @@ export function PwaManager() {
 
   const dismissInstall=()=>{localStorage.setItem(DISMISS_KEY,String(Date.now()));setInstallEvent(null);setShowIosHelp(false)};
   const install=async()=>{if(!installEvent)return;await installEvent.prompt();const choice=await installEvent.userChoice;if(choice.outcome==="accepted")localStorage.removeItem(DISMISS_KEY);else localStorage.setItem(DISMISS_KEY,String(Date.now()));setInstallEvent(null)};
-  const applyUpdate=()=>{const waiting=registrationRef.current?.waiting;if(waiting)waiting.postMessage({type:"SKIP_WAITING"});else window.location.reload()};
+  const applyUpdate=async()=>{
+    setUpdateError("");
+    try{
+      const registration=registrationRef.current;
+      if(registration&&!registration.waiting)await registration.update();
+      const waiting=registration?.waiting;
+      updateReloadRequestedRef.current=true;
+      if(waiting)waiting.postMessage({type:"SKIP_WAITING"});
+      else window.location.reload();
+    }catch{
+      updateReloadRequestedRef.current=false;
+      setUpdateError("新版更新失敗，請檢查網路後再試一次。");
+    }
+  };
 
   return <>
     {showLaunchSplash&&<div className="pwa-launch-splash" aria-hidden="true">
@@ -102,7 +122,7 @@ export function PwaManager() {
       </div>
     </div>}
     <div className="pwa-manager">
-      {updateAvailable&&<aside className="pwa-notice pwa-update-notice" role="status" aria-live="polite"><div><strong>星星日記已更新</strong><span>點擊重新整理即可使用最新版本。</span></div><button type="button" onClick={applyUpdate}>重新整理</button></aside>}
+      {updateAvailable&&<aside className="pwa-notice pwa-update-notice" role="status" aria-live="polite"><div><strong>星星日記有新版本</strong><span>{updateError||"按下立即更新後，才會重新載入最新版本。"}</span></div><button type="button" onClick={()=>void applyUpdate()}>立即更新</button></aside>}
       {!updateAvailable&&installEvent&&<aside className="pwa-notice pwa-install-notice" aria-label="安裝星星日記"><div><strong>安裝星星日記 App</strong><span>加入桌面後可全螢幕開啟，使用更快速。</span></div><div className="pwa-notice-actions"><button type="button" className="pwa-dismiss" onClick={dismissInstall}>稍後</button><button type="button" onClick={()=>void install()}>安裝 App</button></div></aside>}
       {!updateAvailable&&!installEvent&&showIosHelp&&<aside className="pwa-notice pwa-install-notice" aria-label="將星星日記加入 iPhone 主畫面"><div><strong>加入 iPhone 主畫面</strong><span>請點擊 Safari 的「分享」按鈕，再選擇「加入主畫面」。</span></div><button type="button" className="pwa-dismiss" onClick={dismissInstall}>知道了</button></aside>}
       <footer className="pwa-version" aria-label={`目前版本 ${__STAR_DIARY_VERSION__}`}>Version {__STAR_DIARY_VERSION__}</footer>

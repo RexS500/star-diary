@@ -206,9 +206,9 @@ export async function getInvitationByToken(token: string, now = Date.now()) {
   const row = await invitationRowByHash(await sha256Hex(token));
   if (!row) throw new AccountApiError("找不到這個邀請", 404);
   const invitation = publicInvitation(row, await getFamilyChildren(row.family_id), now);
-  if (invitation.status === "expired") throw new AccountApiError("這個邀請已失效，請家長重新建立", 410);
-  if (invitation.status === "cancelled") throw new AccountApiError("這個邀請已取消", 409);
-  if (invitation.status === "accepted") throw new AccountApiError("這個邀請已經使用過", 409);
+  if (invitation.status === "expired") throw new AccountApiError("此邀請已失效，請請家長重新產生邀請網址。", 410);
+  if (invitation.status === "cancelled") throw new AccountApiError("此邀請已取消，請向家長索取新的邀請網址。", 409);
+  if (invitation.status === "accepted") throw new AccountApiError("此邀請已經被使用。", 409);
   return invitation;
 }
 
@@ -580,9 +580,9 @@ export async function acceptFamilyInvitation(
   const row = await invitationRowByHash(tokenHash);
   if (!row) throw new AccountApiError("找不到這個邀請", 404);
   const status = effectiveInvitationStatus(row.status, row.expires_at, now);
-  if (status === "expired") throw new AccountApiError("這個邀請已失效，請家長重新建立", 410);
-  if (status === "cancelled") throw new AccountApiError("這個邀請已取消", 409);
-  if (status === "accepted") throw new AccountApiError("這個邀請已經使用過", 409);
+  if (status === "expired") throw new AccountApiError("此邀請已失效，請請家長重新產生邀請網址。", 410);
+  if (status === "cancelled") throw new AccountApiError("此邀請已取消，請向家長索取新的邀請網址。", 409);
+  if (status === "accepted") throw new AccountApiError("此邀請已經被使用。", 409);
 
   const existing = await env.DB.prepare(
     "SELECT family_id FROM family_members WHERE user_id = ? LIMIT 1",

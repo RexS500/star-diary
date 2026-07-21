@@ -49,11 +49,6 @@ export function normalizeAccountEmail(value: string | null | undefined) {
   return value?.trim().toLocaleLowerCase("en-US") || "";
 }
 
-function familyNameForUser(name: string | null | undefined) {
-  const clean = name?.trim().slice(0, 80);
-  return clean ? `${clean} 的家庭` : "我的家庭";
-}
-
 function sessionUser(session: Session | null): FamilyAccess["user"] {
   const id = session?.user?.id;
   const email = normalizeAccountEmail(session?.user?.email);
@@ -107,30 +102,13 @@ async function claimLegacyFamily(user: FamilyAccess["user"]) {
   return membershipForUser(user.id);
 }
 
-async function createFamilyForUser(user: FamilyAccess["user"]) {
-  const familyId = `family-${user.id}`;
-  const now = new Date().toISOString();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT OR IGNORE INTO families (id, name, legacy_state, created_at, updated_at) VALUES (?, ?, 0, ?, ?)",
-    ).bind(familyId, familyNameForUser(user.name), now, now),
-    env.DB.prepare(
-      `INSERT OR IGNORE INTO family_members
-         (family_id, user_id, role, child_id, created_at, updated_at, status)
-       VALUES (?, ?, 'owner', NULL, ?, ?, 'active')`,
-    ).bind(familyId, user.id, now, now),
-  ]);
-  return membershipForUser(user.id);
-}
-
-export async function getFamilyForAuthenticatedUser(
+export async function findFamilyForAuthenticatedUser(
   user: FamilyAccess["user"],
-): Promise<FamilyAccess> {
+): Promise<FamilyAccess | null> {
   const membership =
     await membershipForUser(user.id) ||
-    await claimLegacyFamily(user) ||
-    await createFamilyForUser(user);
-  if (!membership) throw new FamilyAccessError("無法建立家庭資料，請稍後再試", 403);
+    await claimLegacyFamily(user);
+  if (!membership) return null;
   return {
     familyId: membership.family_id,
     familyName: membership.family_name,
@@ -141,6 +119,14 @@ export async function getFamilyForAuthenticatedUser(
       : null,
     user,
   };
+}
+
+export async function getFamilyForAuthenticatedUser(
+  user: FamilyAccess["user"],
+): Promise<FamilyAccess> {
+  const family = await findFamilyForAuthenticatedUser(user);
+  if (!family) throw new FamilyAccessError("這個 Google 帳號尚未加入任何家庭。", 403);
+  return family;
 }
 
 export async function getMemberChildPermissions(family: FamilyAccess): Promise<MemberChildPermission[]> {

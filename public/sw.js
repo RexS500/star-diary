@@ -1,6 +1,6 @@
 /* Star Diary service worker: authenticated and private responses are never cached. */
 const BUILD_ID = new URL(self.location.href).searchParams.get("v") || "development";
-const CACHE_PREFIX = "star-diary-pwa-v3-auth";
+const CACHE_PREFIX = "star-diary-pwa-v4-refresh";
 const SHELL_CACHE = `${CACHE_PREFIX}-shell-${BUILD_ID}`;
 const RUNTIME_CACHE = `${CACHE_PREFIX}-runtime-${BUILD_ID}`;
 const CORE_ASSETS = [
@@ -51,18 +51,13 @@ self.addEventListener("fetch", event => {
     event.respondWith(fetch(request, { cache: "no-store" }));
     return;
   }
-  if (
-    url.pathname.startsWith("/api/auth") ||
-    url.pathname === "/api/state" ||
-    url.pathname.startsWith("/api/media")
-  ) {
+  if (url.pathname.startsWith("/api/")) {
     event.respondWith(
       fetch(new Request(request, { cache: "no-store" }))
-        .catch(() => Response.json({ error: "offline" }, { status: 503 })),
+        .catch(() => Response.json({ error: "網路離線，請連線後再試一次。" }, { status: 503 })),
     );
     return;
   }
-  if (url.pathname.startsWith("/api/")) return;
   if (request.mode === "navigate") {
     event.respondWith(fetch(new Request(request, { cache: "no-store" })).catch(() => caches.match("/offline.html")));
     return;
