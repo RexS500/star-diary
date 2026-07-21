@@ -72,3 +72,18 @@ test("server reconciles cached child stars from the shared ledger",()=>{
   assert.match(source,/calculateChildStarBalance\(state\.entries,state\.redemptions,record\.childId\)/);
   assert.doesNotMatch(source,/child\.stars\s*[+\-]=/);
 });
+
+test("yesterday task backfill is a parent-only dated task completion",()=>{
+  const start=source.indexOf('if (body.action === "parent_daily_task_backfill")');
+  const end=source.indexOf('if (body.action === "parent_daily_task_action")',start);
+  const block=source.slice(start,end);
+  assert.ok(start>0);
+  assert.match(block,/requireFamilyManager\(family\)/);
+  assert.match(block,/addCalendarDays\(taipeiDateKey\(\), -1\)/);
+  assert.match(block,/item\.date === yesterday/);
+  assert.match(block,/completeDailyTask\(state, record, "parent", \{ backfilled: true \}\)/);
+  assert.match(source,/occurredAt = historical \? taipeiDateKeyAtNoonIso\(record\.date\) : nowIso/);
+  assert.match(source,/createdAt: nowIso/);
+  assert.match(source,/record\.backfilledAt = nowIso/);
+  assert.match(source,/歷史任務請使用昨天補登功能/);
+});

@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
 import {
+    addCalendarDays,
     calendarDateRange,
     isCalendarDateKey,
     isTaskScheduled,
     taipeiDateKey,
+    taipeiDateKeyAtNoonIso,
     taskSettingsForChild,
     type DailyTaskDefinition,
     type DailyTaskRecord,
@@ -174,7 +176,7 @@ function normalizeDailyTaskRecords(value: unknown) {
         };
         if (record.goalModeSnapshot === "all" || record.goalModeSnapshot === "percentage" || record.goalModeSnapshot === "count") normalized.goalModeSnapshot = record.goalModeSnapshot;
         if (Number.isFinite(Number(record.goalValueSnapshot))) normalized.goalValueSnapshot = positiveInt(record.goalValueSnapshot);
-        for (const key of ["completedAt", "approvedAt", "requestedAt", "skippedAt"] as const) if (validIso(record[key])) normalized[key] = record[key];
+        for (const key of ["occurredAt", "completedAt", "backfilledAt", "approvedAt", "requestedAt", "skippedAt"] as const) if (validIso(record[key])) normalized[key] = record[key];
         if (record.completedBy === "child" || record.completedBy === "parent") normalized.completedBy = record.completedBy;
         if (typeof record.rewardEntryId === "string" && record.rewardEntryId) normalized.rewardEntryId = record.rewardEntryId;
         return normalized;
@@ -413,17 +415,25 @@ function findActiveTaskEntry(state: StoredState, record: DailyTaskRecord) {
     return byId || state.entries.find(entry => isActiveTaskEntry(entry, record));
 }
 
-function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "child" | "parent") {
+function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "child" | "parent", options: { backfilled?: boolean } = {}) {
     if (record.status === "completed") return false;
     if (record.status === "skipped") throw new ApiError("請先將任務恢復為待完成", 409);
     const duplicate = state.dailyTaskRecords.find(item => item.id !== record.id && dailyRecordKey(item) === dailyRecordKey(record) && (item.status === "completed" || item.status === "pending_approval"));
     if (duplicate) throw new ApiError("今天這項任務已經送出或完成，請先刷新頁面", 409);
     const existing = findActiveTaskEntry(state, record);
     const nowIso = new Date().toISOString();
+    const historical = record.date < taipeiDateKey();
+    const occurredAt = historical ? taipeiDateKeyAtNoonIso(record.date) : nowIso;
+    if (!occurredAt) throw new ApiError("任務日期不正確，請刷新後再試", 409);
     if (existing) {
+        existing.occurredAt = occurredAt;
+        existing.date = new Date(occurredAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false });
+        existing.createdAt = validIso(existing.createdAt) ? existing.createdAt : nowIso;
         record.status = "completed";
         record.rewardEntryId = existing.id;
+        record.occurredAt = occurredAt;
         record.completedAt = record.completedAt || nowIso;
+        if (options.backfilled) record.backfilledAt = nowIso;
         record.approvedAt = nowIso;
         record.completedBy = actor;
         record.updatedAt = nowIso;
@@ -431,12 +441,14 @@ function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "
         delete record.skippedAt;
         return true;
     }
-    const entry = { id: crypto.randomUUID(), childId: record.childId, title: `每日任務：${record.titleSnapshot}`, amount: positiveInt(record.rewardStarsSnapshot), type: "star", date: new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), occurredAt: nowIso, createdAt: nowIso, status: "completed", sourceType: "daily_task", sourceId: record.id };
+    const entry = { id: crypto.randomUUID(), childId: record.childId, title: `每日任務：${record.titleSnapshot}`, amount: positiveInt(record.rewardStarsSnapshot), type: "star", date: new Date(occurredAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", hour12: false }), occurredAt, createdAt: nowIso, status: "completed", sourceType: "daily_task", sourceId: record.id };
     const child = state.children.find(item => item.id === record.childId);
     if (!child) throw new ApiError("找不到孩子資料", 404);
     state.entries = [entry, ...state.entries];
     record.status = "completed";
+    record.occurredAt = occurredAt;
     record.completedAt = nowIso;
+    if (options.backfilled) record.backfilledAt = nowIso;
     record.approvedAt = nowIso;
     record.completedBy = actor;
     record.rewardEntryId = entry.id;
@@ -444,6 +456,29 @@ function completeDailyTask(state: StoredState, record: DailyTaskRecord, actor: "
     delete record.requestedAt;
     delete record.skippedAt;
     return true;
+}
+
+async function recordDailyTaskCompletionEvents(state: StoredState, recordId: string | undefined, family: FamilyAccess, source: string) {
+    const completedRecord = state.dailyTaskRecords.find(item => item.id === recordId);
+    if (completedRecord?.status !== "completed") return;
+    await recordOperationalEvent({
+        eventType: "daily_task_completed",
+        familyId: family.familyId,
+        userId: family.user.id,
+        source,
+        dedupeKey: `state-daily-task:${family.familyId}:${completedRecord.id}:completed`,
+        occurredAt: completedRecord.occurredAt || completedRecord.completedAt,
+    });
+    const rewardEntry = state.entries.find(entry => entry.id === completedRecord.rewardEntryId);
+    if (rewardEntry) await recordOperationalEvent({
+        eventType: "star_add",
+        familyId: family.familyId,
+        userId: family.user.id,
+        amount: positiveInt(rewardEntry.amount),
+        source: "daily_task",
+        dedupeKey: `state-entry:${family.familyId}:${rewardEntry.id}:completed`,
+        occurredAt: rewardEntry.occurredAt,
+    });
 }
 
 export async function GET() {
@@ -632,27 +667,22 @@ export async function POST(req: Request) {
                 }
                 return completeDailyTask(state, record, "child");
             });
-            const completedRecord = result.state.dailyTaskRecords.find(item => item.id === body.recordId);
-            if (completedRecord?.status === "completed") {
-                await recordOperationalEvent({
-                    eventType: "daily_task_completed",
-                    familyId,
-                    userId: family.user.id,
-                    source: "child",
-                    dedupeKey: `state-daily-task:${familyId}:${completedRecord.id}:completed`,
-                    occurredAt: completedRecord.completedAt,
-                });
-                const rewardEntry = result.state.entries.find(entry => entry.id === completedRecord.rewardEntryId);
-                if (rewardEntry) await recordOperationalEvent({
-                    eventType: "star_add",
-                    familyId,
-                    userId: family.user.id,
-                    amount: positiveInt(rewardEntry.amount),
-                    source: "daily_task",
-                    dedupeKey: `state-entry:${familyId}:${rewardEntry.id}:completed`,
-                    occurredAt: rewardEntry.occurredAt,
-                });
-            }
+            await recordDailyTaskCompletionEvents(result.state, body.recordId, family, "child");
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
+        }
+
+        if (body.action === "parent_daily_task_backfill") {
+            requireFamilyManager(family);
+            const yesterday = addCalendarDays(taipeiDateKey(), -1);
+            const result = await mutateState(familyId, async state => {
+                await requireParent(state, body.password || "");
+                const record = state.dailyTaskRecords.find(item => item.id === body.recordId && item.childId === body.childId && item.date === yesterday);
+                if (!record) throw new ApiError("找不到昨天的任務，請刷新後再試", 404);
+                if (record.status === "completed") throw new ApiError("昨天這項任務已經完成，不能重複補登", 409);
+                if (record.status === "skipped") throw new ApiError("這項任務已標記為昨天不適用", 409);
+                return completeDailyTask(state, record, "parent", { backfilled: true });
+            });
+            await recordDailyTaskCompletionEvents(result.state, body.recordId, family, "parent_backfill");
             return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 
@@ -664,6 +694,7 @@ export async function POST(req: Request) {
                 if (!record) throw new ApiError("找不到任務紀錄，請刷新後再試", 404);
                 const nowIso = new Date().toISOString();
                 if (body.operation === "complete") {
+                    if (record.date !== taipeiDateKey()) throw new ApiError("歷史任務請使用昨天補登功能", 409);
                     if (record.status !== "pending") throw new ApiError("只有尚未完成的任務可以由家長標記完成", 409);
                     return completeDailyTask(state, record, "parent");
                 }
@@ -695,34 +726,12 @@ export async function POST(req: Request) {
                     entry.revokedAt = nowIso;
                     record.status = "pending";
                     record.updatedAt = nowIso;
-                    delete record.completedAt; delete record.approvedAt; delete record.completedBy; delete record.rewardEntryId;
+                    delete record.occurredAt; delete record.completedAt; delete record.backfilledAt; delete record.approvedAt; delete record.completedBy; delete record.rewardEntryId;
                     return true;
                 }
                 throw new ApiError("不支援的任務操作", 400);
             });
-            if (body.operation === "complete" || body.operation === "approve") {
-                const completedRecord = result.state.dailyTaskRecords.find(item => item.id === body.recordId);
-                if (completedRecord?.status === "completed") {
-                    await recordOperationalEvent({
-                        eventType: "daily_task_completed",
-                        familyId,
-                        userId: family.user.id,
-                        source: "parent",
-                        dedupeKey: `state-daily-task:${familyId}:${completedRecord.id}:completed`,
-                        occurredAt: completedRecord.completedAt,
-                    });
-                    const rewardEntry = result.state.entries.find(entry => entry.id === completedRecord.rewardEntryId);
-                    if (rewardEntry) await recordOperationalEvent({
-                        eventType: "star_add",
-                        familyId,
-                        userId: family.user.id,
-                        amount: positiveInt(rewardEntry.amount),
-                        source: "daily_task",
-                        dedupeKey: `state-entry:${familyId}:${rewardEntry.id}:completed`,
-                        occurredAt: rewardEntry.occurredAt,
-                    });
-                }
-            }
+            if (body.operation === "complete" || body.operation === "approve") await recordDailyTaskCompletionEvents(result.state, body.recordId, family, "parent");
             return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 

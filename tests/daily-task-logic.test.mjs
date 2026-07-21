@@ -10,6 +10,7 @@ import {
   isTaskScheduled,
   taskProgress,
   taipeiDateKey,
+  taipeiDateKeyAtNoonIso,
   weekStartDateKey,
   weeklyTaskProgress,
 } from "../app/daily-task-logic.ts";
@@ -43,6 +44,13 @@ test("calendar helpers reject impossible dates and handle boundaries", () => {
   assert.equal(isCalendarDateKey("2024-02-29"), true);
   assert.equal(addCalendarDays("2024-02-29", 1), "2024-03-01");
   assert.equal(addCalendarDays("2026-12-31", 1), "2027-01-01");
+});
+
+test("yesterday task occurrence stays on the intended Asia/Taipei date", () => {
+  const occurredAt = taipeiDateKeyAtNoonIso("2026-07-21");
+  assert.equal(occurredAt, "2026-07-21T04:00:00.000Z");
+  assert.equal(taipeiDateKey(occurredAt), "2026-07-21");
+  assert.equal(taipeiDateKeyAtNoonIso("2026-02-30"), "");
 });
 
 test("scheduled tasks respect enabled state, start date and weekday", () => {

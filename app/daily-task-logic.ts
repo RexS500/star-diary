@@ -35,7 +35,9 @@ export type DailyTaskRecord = {
     goalModeSnapshot?: DailyTaskGoalMode;
     goalValueSnapshot?: number;
     status: DailyTaskStatus;
+    occurredAt?: string;
     completedAt?: string;
+    backfilledAt?: string;
     approvedAt?: string;
     requestedAt?: string;
     skippedAt?: string;
@@ -86,6 +88,13 @@ export function addCalendarDays(dateKey: string, amount: number) {
     const [year, month, day] = dateKey.split("-").map(Number);
     if (![year, month, day].every(Number.isFinite)) return dateKey;
     return new Date(Date.UTC(year, month - 1, day + amount)).toISOString().slice(0, 10);
+}
+
+export function taipeiDateKeyAtNoonIso(dateKey: string) {
+    if (!isCalendarDateKey(dateKey)) return "";
+    const [year, month, day] = dateKey.split("-").map(Number);
+    const instant = new Date(Date.UTC(year, month - 1, day, 4));
+    return taipeiDateKey(instant) === dateKey ? instant.toISOString() : "";
 }
 
 export function weekdayForDateKey(dateKey: string) {
