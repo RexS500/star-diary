@@ -87,3 +87,19 @@ test("yesterday task backfill is a parent-only dated task completion",()=>{
   assert.match(source,/record\.backfilledAt = nowIso/);
   assert.match(source,/歷史任務請使用昨天補登功能/);
 });
+
+test("current task definitions can create a separately marked yesterday backfill",()=>{
+  const start=source.indexOf('if (body.action === "parent_daily_task_backfill_current_definition")');
+  const end=source.indexOf('if (body.action === "parent_daily_task_action")',start);
+  const block=source.slice(start,end);
+  assert.ok(start>0);
+  assert.match(block,/requireFamilyManager\(family\)/);
+  assert.match(block,/task\.enabled/);
+  assert.match(block,/task\.applicableChildIds\.includes\(child\.id\)/);
+  assert.match(block,/task\.weekdays\.includes\(weekdayForDateKey\(yesterday\)\)/);
+  assert.match(block,/state\.dailyTaskRecords\.some/);
+  assert.match(block,/titleSnapshot: task\.title/);
+  assert.match(block,/rewardStarsSnapshot: task\.rewardStars/);
+  assert.match(block,/backfillSource: "current_definition"/);
+  assert.match(block,/completeDailyTask\(state, record, "parent", \{ backfilled: true \}\)/);
+});

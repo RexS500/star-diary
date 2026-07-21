@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   addCalendarDays,
   calculateTaskStreak,
+  currentDefinitionBackfillCandidates,
   dailyTaskDayView,
   goalResult,
   isCalendarDateKey,
@@ -59,6 +60,55 @@ test("scheduled tasks respect enabled state, start date and weekday", () => {
   assert.equal(isTaskScheduled(task, "2026-07-15"), false);
   assert.equal(isTaskScheduled({ ...task, enabled: false }, "2026-07-16"), false);
   assert.equal(isTaskScheduled({ ...task, weekdays: [5] }, "2026-07-16"), false);
+});
+
+test("current definitions add separate yesterday backfill candidates without changing snapshots", () => {
+  const task = {
+    id: "swimming",
+    applicableChildIds: ["c1"],
+    title: "游泳訓練",
+    icon: "🏊",
+    rewardStars: 2,
+    weekdays: [2, 3, 4],
+    enabled: true,
+    sortOrder: 0,
+    customOrder: 0,
+    timeSlot: "after_school",
+    sourceType: "custom",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:00.000Z",
+    scheduleStart: "2026-07-22",
+  };
+  const candidates = currentDefinitionBackfillCandidates([task], [], "c1", "2026-07-21", "flow");
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].definitionId, "swimming");
+  assert.equal(candidates[0].backfillSource, "current_definition");
+  assert.equal(candidates[0].isVirtualBackfillCandidate, true);
+  assert.equal(candidates[0].titleSnapshot, "游泳訓練");
+
+  const original = { ...record("2026-07-21", "pending", "old"), definitionId: "swimming", titleSnapshot: "昨天的游泳快照", rewardStarsSnapshot: 1 };
+  assert.deepEqual(currentDefinitionBackfillCandidates([task], [original], "c1", "2026-07-21"), []);
+  assert.equal(original.titleSnapshot, "昨天的游泳快照");
+  assert.equal(original.rewardStarsSnapshot, 1);
+});
+
+test("current-definition backfill candidates honor enabled, child and yesterday weekday", () => {
+  const base = {
+    id: "swimming",
+    applicableChildIds: ["c1"],
+    title: "游泳訓練",
+    icon: "🏊",
+    rewardStars: 2,
+    weekdays: [2],
+    enabled: true,
+    sortOrder: 0,
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:00.000Z",
+    scheduleStart: "2026-07-22",
+  };
+  assert.equal(currentDefinitionBackfillCandidates([{ ...base, enabled: false }], [], "c1", "2026-07-21").length, 0);
+  assert.equal(currentDefinitionBackfillCandidates([base], [], "c2", "2026-07-21").length, 0);
+  assert.equal(currentDefinitionBackfillCandidates([{ ...base, weekdays: [3] }], [], "c1", "2026-07-21").length, 0);
 });
 
 test("skipped tasks leave both numerator and denominator", () => {

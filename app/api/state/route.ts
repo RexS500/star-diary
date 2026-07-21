@@ -7,6 +7,7 @@ import {
     taipeiDateKey,
     taipeiDateKeyAtNoonIso,
     taskSettingsForChild,
+    weekdayForDateKey,
     type DailyTaskDefinition,
     type DailyTaskRecord,
     type DailyTaskSettings,
@@ -178,6 +179,7 @@ function normalizeDailyTaskRecords(value: unknown) {
         if (Number.isFinite(Number(record.goalValueSnapshot))) normalized.goalValueSnapshot = positiveInt(record.goalValueSnapshot);
         for (const key of ["occurredAt", "completedAt", "backfilledAt", "approvedAt", "requestedAt", "skippedAt"] as const) if (validIso(record[key])) normalized[key] = record[key];
         if (record.completedBy === "child" || record.completedBy === "parent") normalized.completedBy = record.completedBy;
+        if (record.backfillSource === "current_definition") normalized.backfillSource = "current_definition";
         if (typeof record.rewardEntryId === "string" && record.rewardEntryId) normalized.rewardEntryId = record.rewardEntryId;
         return normalized;
     }).filter((record): record is DailyTaskRecord => Boolean(record));
@@ -518,6 +520,7 @@ export async function POST(req: Request) {
             state?: Record<string, unknown>;
             record?: Record<string, unknown>;
             recordId?: string;
+            definitionId?: string;
             childId?: string;
             operation?: string;
             expectedRevision?: number;
@@ -683,6 +686,46 @@ export async function POST(req: Request) {
                 return completeDailyTask(state, record, "parent", { backfilled: true });
             });
             await recordDailyTaskCompletionEvents(result.state, body.recordId, family, "parent_backfill");
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
+        }
+
+        if (body.action === "parent_daily_task_backfill_current_definition") {
+            requireFamilyManager(family);
+            const yesterday = addCalendarDays(taipeiDateKey(), -1);
+            let createdRecordId = "";
+            const result = await mutateState(familyId, async state => {
+                await requireParent(state, body.password || "");
+                const child = state.children.find(item => item.id === body.childId);
+                if (!child) throw new ApiError("找不到孩子資料", 404);
+                const task = state.dailyTasks.find(item => item.id === body.definitionId);
+                if (!task) throw new ApiError("找不到目前的每日任務設定，請刷新後再試", 404);
+                if (!task.enabled || !task.applicableChildIds.includes(child.id) || !task.weekdays.includes(weekdayForDateKey(yesterday))) {
+                    throw new ApiError("這項任務依目前設定不適用於昨天，請刷新後再試", 409);
+                }
+                if (state.dailyTaskRecords.some(item => item.definitionId === task.id && item.childId === child.id && item.date === yesterday)) {
+                    throw new ApiError("昨天已經有這項任務紀錄，不能重複補登", 409);
+                }
+                const nowIso = new Date().toISOString(), goal = taskSettingsForChild(state.dailyTaskSettings, child.id);
+                const record: DailyTaskRecord = {
+                    id: crypto.randomUUID(),
+                    definitionId: task.id,
+                    childId: child.id,
+                    date: yesterday,
+                    titleSnapshot: task.title,
+                    iconSnapshot: task.icon,
+                    rewardStarsSnapshot: task.rewardStars,
+                    goalModeSnapshot: goal.goalMode,
+                    goalValueSnapshot: goal.goalValue,
+                    status: "pending",
+                    backfillSource: "current_definition",
+                    createdAt: nowIso,
+                    updatedAt: nowIso,
+                };
+                createdRecordId = record.id;
+                state.dailyTaskRecords = [record, ...state.dailyTaskRecords];
+                return completeDailyTask(state, record, "parent", { backfilled: true });
+            });
+            await recordDailyTaskCompletionEvents(result.state, createdRecordId, family, "parent_backfill_current_definition");
             return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 

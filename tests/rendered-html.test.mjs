@@ -35,11 +35,13 @@ test("daily tasks are connected to settings, challenge navigation and server act
   assert.match(route, /child_daily_task_complete/);
   assert.match(route, /parent_daily_task_action/);
   assert.match(route, /parent_daily_task_backfill/);
+  assert.match(route, /parent_daily_task_backfill_current_definition/);
   assert.match(route, /sourceType:\s*"daily_task"/);
-  for (const label of ["查看昨天任務", "返回今天任務", "昨天任務補登模式", "補登完成", "確認補登", "請家長協助補登"]) assert.match(home, new RegExp(label));
+  for (const label of ["查看昨天任務", "返回今天任務", "昨天任務補登模式", "昨天原本任務", "可補登任務", "依目前設定補登", "補登完成", "確認補登", "請家長協助補登"]) assert.match(home, new RegExp(label));
   assert.match(css, /\.daily-task-settings-card/);
   assert.match(css, /\.task-card-grid/);
   assert.match(css, /\.task-backfill-banner/);
+  assert.match(css, /\.task-current-definition-badge/);
 });
 
 test("family settings use a reversible draft and a safe-area sticky save bar", async () => {

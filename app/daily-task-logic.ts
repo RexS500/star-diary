@@ -38,6 +38,8 @@ export type DailyTaskRecord = {
     occurredAt?: string;
     completedAt?: string;
     backfilledAt?: string;
+    backfillSource?: "current_definition";
+    isVirtualBackfillCandidate?: boolean;
     approvedAt?: string;
     requestedAt?: string;
     skippedAt?: string;
@@ -184,6 +186,38 @@ export function dailyTaskDayView(
         finished: todayRecords.filter(record => record.status === "completed" || record.status === "skipped"),
         progress: taskProgress(todayRecords),
     };
+}
+
+export function currentDefinitionBackfillCandidates(
+    definitions: DailyTaskDefinition[],
+    records: DailyTaskRecord[],
+    childId: string,
+    dateKey: string,
+    sortMode: DailyTaskSortMode = "flow",
+) {
+    if (!childId || !isCalendarDateKey(dateKey)) return [];
+    const weekday = weekdayForDateKey(dateKey);
+    const existing = new Set(records.map(record => `${record.definitionId}|${record.childId}|${record.date}`));
+    return [...definitions]
+        .filter(task => task.enabled
+            && task.applicableChildIds.includes(childId)
+            && task.weekdays.includes(weekday)
+            && !existing.has(`${task.id}|${childId}|${dateKey}`))
+        .sort((left, right) => compareDailyTaskDefinitions(left, right, sortMode))
+        .map(task => ({
+            id: `current-definition:${task.id}:${childId}:${dateKey}`,
+            definitionId: task.id,
+            childId,
+            date: dateKey,
+            titleSnapshot: task.title,
+            iconSnapshot: task.icon,
+            rewardStarsSnapshot: task.rewardStars,
+            status: "pending" as const,
+            backfillSource: "current_definition" as const,
+            isVirtualBackfillCandidate: true,
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+        }));
 }
 
 export function goalResult(progress: TaskProgress, settings: DailyTaskSettings) {
