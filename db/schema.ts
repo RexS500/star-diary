@@ -128,6 +128,25 @@ export const mediaObjects = sqliteTable("media_objects", {
   index("media_objects_key_idx").on(table.objectKey),
 ]);
 
+// Family deletion audits intentionally do not reference users or families.
+// They must survive after the family is permanently removed.
+export const familyDeletionAudit = sqliteTable("family_deletion_audit", {
+  id: text("id").primaryKey().notNull(),
+  action: text("action", { enum: ["delete_family"] }).notNull(),
+  actorUserId: text("actor_user_id").notNull(),
+  actorEmail: text("actor_email").notNull(),
+  familyId: text("family_id").notNull(),
+  familyName: text("family_name").notNull(),
+  deletedAt: text("deleted_at").notNull(),
+  summaryJson: text("summary_json").notNull(),
+  r2CleanupStatus: text("r2_cleanup_status", { enum: ["pending", "complete", "partial"] }).notNull().default("pending"),
+  r2FailedKeysJson: text("r2_failed_keys_json"),
+  cleanupUpdatedAt: text("cleanup_updated_at"),
+}, table => [
+  index("family_deletion_audit_family_idx").on(table.familyId, table.deletedAt),
+  index("family_deletion_audit_actor_idx").on(table.actorUserId, table.deletedAt),
+]);
+
 export const appMigrations = sqliteTable("app_migrations", {
   version: text("version").primaryKey().notNull(),
   appliedAt: text("applied_at").notNull(),

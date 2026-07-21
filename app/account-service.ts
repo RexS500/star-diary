@@ -1,6 +1,13 @@
 import { env } from "cloudflare:workers";
 import type { FamilyAccess } from "./family-access";
 import {
+  familyMediaKeysForDeletion,
+  forceDeleteConfirmationValid,
+  mediaKeysReferencedByFamilyState,
+  summarizeFamilyState,
+  type FamilyDeletionSummary,
+} from "./family-deletion-logic";
+import {
   INVITATION_TTL_MS,
   canRemoveFamilyMember,
   createInvitationCredential,
@@ -21,8 +28,9 @@ import {
 type ChildSummary = { id: string; name: string };
 type FamilyStateRow = { data: string };
 type FamilyExitStateRow = { data: string; updated_at: number };
-type FamilyExitFamilyRow = { legacy_state: number };
+type FamilyExitFamilyRow = { id: string; name: string; legacy_state: number };
 type CountRow = { count: number };
+type MediaObjectRow = { object_key: string };
 type MemberRow = {
   family_id: string;
   user_id: string;
@@ -61,7 +69,7 @@ type InvitationRow = {
 };
 
 export class AccountApiError extends Error {
-  constructor(message: string, public status: 401 | 403 | 404 | 409 | 410 | 422 = 422) {
+  constructor(message: string, public status: 401 | 403 | 404 | 409 | 410 | 422 | 500 = 422) {
     super(message);
   }
 }
@@ -69,7 +77,7 @@ export class AccountApiError extends Error {
 export function accountApiErrorResponse(error: unknown) {
   const status = error instanceof AccountApiError ? error.status : 500;
   return Response.json(
-    { error: error instanceof Error ? error.message : "伺服器暫時無法處理要求" },
+    { error: error instanceof AccountApiError ? error.message : "伺服器暫時無法處理要求" },
     { status, headers: { "Cache-Control": "private, no-store" } },
   );
 }
@@ -119,7 +127,7 @@ function invitationPermissions(row: InvitationRow, children: ChildSummary[]) {
 
 async function inspectFamilyExit(family: FamilyAccess) {
   const [familyResult, membersResult, stateResult, mediaResult, invitationsResult, permissionsResult] = await env.DB.batch([
-    env.DB.prepare("SELECT legacy_state FROM families WHERE id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT id, name, legacy_state FROM families WHERE id = ?").bind(family.familyId),
     env.DB.prepare("SELECT COUNT(*) AS count FROM family_members WHERE family_id = ? AND status = 'active'").bind(family.familyId),
     env.DB.prepare("SELECT data, updated_at FROM family_state WHERE family_id = ?").bind(family.familyId),
     env.DB.prepare("SELECT COUNT(*) AS count FROM media_objects WHERE family_id = ?").bind(family.familyId),
@@ -133,23 +141,32 @@ async function inspectFamilyExit(family: FamilyAccess) {
   const relatedDataCount = [mediaResult, invitationsResult, permissionsResult]
     .reduce((total, result) => total + Number((result.results?.[0] as CountRow | undefined)?.count || 0), 0);
   const stateIsEmpty = isEmptyFamilyState(stateRow?.data);
+  const stateSummary = summarizeFamilyState(stateRow?.data);
   const familyIsEmpty = stateIsEmpty && relatedDataCount === 0;
   const isLegacyFamily = Boolean(familyRow.legacy_state) || family.familyId === "legacy-family-v1";
   const canLeave = family.role === "parent" || family.role === "child";
   const canDeleteEmptyFamily = family.role === "owner" && memberCount === 1 && familyIsEmpty && !isLegacyFamily;
+  const canForceDeleteFamily = family.role === "owner";
   let blockedReason: string | null = null;
   if (family.role === "owner") {
     if (isLegacyFamily) blockedReason = "既有正式家庭不可刪除；如需離開，請先轉移 Owner。";
     else if (memberCount > 1) blockedReason = "Owner 必須先將 Owner 轉移給另一位 Parent，才能離開家庭。";
-    else if (!familyIsEmpty) blockedReason = "家庭仍有孩子、星星、任務、獎勵、紀錄、圖片或邀請資料，不能刪除。";
+    else if (!familyIsEmpty) blockedReason = "家庭含有資料；Owner 可使用「永久刪除家庭」並完成雙重確認。";
   }
   return {
     memberCount,
     familyIsEmpty,
     canLeave,
     canDeleteEmptyFamily,
+    canForceDeleteFamily,
     blockedReason,
     stateUpdatedAt: stateRow?.updated_at ?? null,
+    summary: {
+      memberCount,
+      ...stateSummary,
+      invitationCount: Number((invitationsResult.results?.[0] as CountRow | undefined)?.count || 0),
+      imageCount: Number((mediaResult.results?.[0] as CountRow | undefined)?.count || 0),
+    } satisfies FamilyDeletionSummary,
   };
 }
 
@@ -219,7 +236,9 @@ export async function getAccountManagementSnapshot(family: FamilyAccess, now = D
     isEmpty: exit.familyIsEmpty,
     canLeave: exit.canLeave,
     canDeleteEmptyFamily: exit.canDeleteEmptyFamily,
+    canForceDeleteFamily: exit.canForceDeleteFamily,
     blockedReason: exit.blockedReason,
+    forceDeleteSummary: family.role === "owner" ? exit.summary : null,
   };
   if (!isFamilyManager(family.role)) {
     return {
@@ -568,6 +587,150 @@ export async function deleteEmptyFamily(family: FamilyAccess) {
     ).bind(family.user.id, family.user.id),
   ]);
   if (Number(results[0].meta.changes || 0) !== 1) throw new AccountApiError("家庭資料已變更，未執行刪除，請重新整理確認", 409);
+}
+
+export async function forceDeleteCurrentFamily(
+  family: FamilyAccess,
+  input: { familyNameConfirmation?: unknown; confirmed?: unknown; mode?: unknown },
+) {
+  if (family.role !== "owner") throw new AccountApiError("只有 Owner 可以永久刪除整個家庭", 403);
+  if (input.mode !== "force") throw new AccountApiError("永久刪除模式不正確", 422);
+  if (input.confirmed !== true) throw new AccountApiError("請勾選永久刪除確認", 422);
+
+  const [familyResult, stateResult, membersResult, invitationsResult, mediaResult, oldChildrenResult, oldStarsResult, oldRewardsResult, oldRedemptionsResult] = await env.DB.batch([
+    env.DB.prepare("SELECT id, name, legacy_state FROM families WHERE id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT data, updated_at FROM family_state WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM family_members WHERE family_id = ? AND status = 'active'").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM family_invitations WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT object_key FROM media_objects WHERE family_id = ? ORDER BY object_key").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM children WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM star_entries WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM rewards WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM redemptions WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
+  ]);
+  const familyRow = familyResult.results?.[0] as FamilyExitFamilyRow | undefined;
+  if (!familyRow) throw new AccountApiError("找不到目前家庭，可能已經被刪除", 404);
+  if (!forceDeleteConfirmationValid({
+    submittedName: input.familyNameConfirmation,
+    familyName: familyRow.name,
+    confirmed: input.confirmed,
+    mode: input.mode,
+  })) throw new AccountApiError("家庭名稱確認文字不完全一致", 409);
+
+  const stateRow = stateResult.results?.[0] as FamilyExitStateRow | undefined;
+  const stateSummary = summarizeFamilyState(stateRow?.data);
+  const count = (result: D1Result) => Number((result.results?.[0] as CountRow | undefined)?.count || 0);
+  const summary: FamilyDeletionSummary = {
+    memberCount: count(membersResult),
+    childCount: stateSummary.childCount + count(oldChildrenResult),
+    starRecordCount: stateSummary.starRecordCount + count(oldStarsResult),
+    taskCount: stateSummary.taskCount,
+    taskCompletionRecordCount: stateSummary.taskCompletionRecordCount,
+    rewardCount: stateSummary.rewardCount + count(oldRewardsResult),
+    specialRewardCount: stateSummary.specialRewardCount,
+    redemptionCount: stateSummary.redemptionCount + count(oldRedemptionsResult),
+    quickIndicatorCount: stateSummary.quickIndicatorCount,
+    invitationCount: count(invitationsResult),
+    imageCount: mediaResult.results?.length || 0,
+  };
+  const mediaRows = (mediaResult.results || []) as MediaObjectRow[];
+  const storedKeys = [...new Set([
+    ...mediaRows.map(row => row.object_key),
+    ...mediaKeysReferencedByFamilyState(stateRow?.data),
+  ])];
+  summary.imageCount = storedKeys.length;
+  const safeR2Keys = familyMediaKeysForDeletion(storedKeys, family.familyId);
+  const unsafeKeys = storedKeys.filter(key => !safeR2Keys.includes(key));
+  const auditId = crypto.randomUUID();
+  const deletedAt = new Date().toISOString();
+
+  const deletionStatements = [
+    // The NOT NULL family_id subquery is the transaction authorization guard.
+    // If the current membership is no longer the Owner or the name changed,
+    // this statement fails and D1 rolls back the entire batch.
+    env.DB.prepare(
+      `INSERT INTO family_deletion_audit
+         (id, action, actor_user_id, actor_email, family_id, family_name,
+          deleted_at, summary_json, r2_cleanup_status)
+       VALUES (?, 'delete_family', ?, ?, (
+         SELECT f.id
+           FROM families f
+           JOIN family_members fm ON fm.family_id = f.id
+          WHERE f.id = ? AND f.name = ? AND fm.user_id = ?
+            AND fm.role = 'owner' AND fm.status = 'active'
+       ), ?, ?, ?, 'pending')`,
+    ).bind(
+      auditId,
+      family.user.id,
+      family.user.email,
+      family.familyId,
+      familyRow.name,
+      family.user.id,
+      familyRow.name,
+      deletedAt,
+      JSON.stringify(summary),
+    ),
+    env.DB.prepare("DELETE FROM star_entries WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
+    env.DB.prepare("DELETE FROM redemptions WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
+    env.DB.prepare("DELETE FROM rewards WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("DELETE FROM children WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare(
+      "DELETE FROM app_state WHERE id = 'family' AND EXISTS (SELECT 1 FROM families WHERE id = ? AND legacy_state = 1)",
+    ).bind(family.familyId),
+    env.DB.prepare("DELETE FROM member_child_permissions WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("DELETE FROM family_invitations WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("DELETE FROM media_objects WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("DELETE FROM family_state WHERE family_id = ?").bind(family.familyId),
+    // family_members has ON DELETE CASCADE and is deliberately removed only
+    // after the audit authorization guard has verified the current Owner.
+    env.DB.prepare("DELETE FROM families WHERE id = ?").bind(family.familyId),
+    // If the family row somehow remained, the invalid CHECK value aborts and
+    // rolls the whole D1 batch back instead of leaving a partially deleted family.
+    env.DB.prepare(
+      `UPDATE family_deletion_audit
+          SET r2_cleanup_status = CASE
+            WHEN NOT EXISTS (SELECT 1 FROM families WHERE id = ?) THEN 'pending'
+            ELSE 'abort'
+          END
+        WHERE id = ?`,
+    ).bind(family.familyId, auditId),
+  ];
+
+  try {
+    const results = await env.DB.batch(deletionStatements);
+    if (results.some(result => result.success === false)) throw new Error("D1 batch failed");
+  } catch {
+    throw new AccountApiError("家庭資料刪除失敗，所有資料均已回復，請稍後再試", 500);
+  }
+
+  const deletionResults = await Promise.allSettled(safeR2Keys.map(key => env.MEDIA.delete(key)));
+  const failedKeys = [
+    ...unsafeKeys,
+    ...safeR2Keys.filter((_, index) => deletionResults[index]?.status === "rejected"),
+  ];
+  const cleanupStatus = failedKeys.length ? "partial" : "complete";
+  try {
+    await env.DB.prepare(
+      `UPDATE family_deletion_audit
+          SET r2_cleanup_status = ?, r2_failed_keys_json = ?, cleanup_updated_at = ?
+        WHERE id = ?`,
+    ).bind(
+      cleanupStatus,
+      failedKeys.length ? JSON.stringify(failedKeys) : null,
+      new Date().toISOString(),
+      auditId,
+    ).run();
+  } catch (error) {
+    console.error("family deletion R2 audit update failed", { auditId, failedKeyCount: failedKeys.length, error });
+  }
+
+  return {
+    success: true,
+    message: failedKeys.length
+      ? "家庭已永久刪除；部分圖片清理已記錄，將由管理者後續重試。"
+      : "家庭已永久刪除",
+    r2CleanupComplete: failedKeys.length === 0,
+  };
 }
 
 export async function acceptFamilyInvitation(

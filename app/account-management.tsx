@@ -3,6 +3,7 @@
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_DATA_REFRESH_EVENT, type AppDataRefreshDetail } from "./app-refresh";
+import type { FamilyDeletionSummary } from "./family-deletion-logic";
 import {
   canRemoveFamilyMember,
   effectiveInvitationStatus,
@@ -49,6 +50,7 @@ type InvitationView = {
   inviteUrl?: string;
 };
 type AccountSnapshot = {
+  csrfToken: string;
   family: { id: string; name: string };
   currentUser: { id: string; role: FamilyMemberRole };
   children: ChildSummary[];
@@ -60,7 +62,9 @@ type AccountSnapshot = {
     isEmpty: boolean;
     canLeave: boolean;
     canDeleteEmptyFamily: boolean;
+    canForceDeleteFamily: boolean;
     blockedReason: string | null;
+    forceDeleteSummary: FamilyDeletionSummary | null;
   };
 };
 
@@ -102,6 +106,9 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
   const [permissionBoundChildId, setPermissionBoundChildId] = useState("");
   const [permissionPreset, setPermissionPreset] = useState<PermissionPreset>("only_self");
   const [customPermissions, setCustomPermissions] = useState<ChildPermission[]>([]);
+  const [forceDeleteModal, setForceDeleteModal] = useState(false);
+  const [forceDeleteName, setForceDeleteName] = useState("");
+  const [forceDeleteAcknowledged, setForceDeleteAcknowledged] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -379,10 +386,61 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
     }
   }
 
+  function openForceDeleteFamily() {
+    if (!snapshot || snapshot.currentUser.role !== "owner" || !snapshot.familyExit.canForceDeleteFamily) return;
+    setForceDeleteName("");
+    setForceDeleteAcknowledged(false);
+    setError("");
+    setForceDeleteModal(true);
+  }
+
+  async function permanentlyDeleteFamily() {
+    if (!snapshot || forceDeleteName !== snapshot.family.name || !forceDeleteAcknowledged) return;
+    setBusy("force-delete-family");
+    setError("");
+    let successMessage = "家庭已永久刪除";
+    try {
+      const response = await fetch("/api/family", {
+        method: "DELETE",
+        cache: "no-store",
+        headers: {
+          "content-type": "application/json",
+          "x-star-diary-csrf": snapshot.csrfToken,
+        },
+        body: JSON.stringify({
+          familyNameConfirmation: forceDeleteName,
+          confirmed: true,
+          mode: "force",
+        }),
+      });
+      const result = await response.json() as { error?: string; message?: string };
+      if (!response.ok) throw new Error(result.error || "永久刪除家庭失敗");
+      successMessage = result.message || successMessage;
+    } catch (value) {
+      const message = value instanceof Error ? value.message : "永久刪除家庭失敗";
+      setError(message);
+      onMessage(message);
+      setBusy("");
+      return;
+    }
+    setForceDeleteModal(false);
+    setLoading(true);
+    setSnapshot(null);
+    onMessage(successMessage);
+    try {
+      await signOut({ callbackUrl: "/?family_deleted=1" });
+    } catch {
+      // The membership is already gone, so no family data remains accessible.
+      // A reload lets Auth.js retry sign-out/account selection safely.
+      window.location.replace("/?family_deleted=1");
+    }
+  }
+
   if (loading) return <section className="account-management-loading" aria-label="正在載入帳號管理">正在載入帳號管理…</section>;
   if (!snapshot) return <section className="account-management-error" role="alert"><h2>帳號管理暫時無法開啟</h2><p>{error}</p><button onClick={() => void load()}>重新整理</button></section>;
 
   const canManageFamily = isFamilyManager(snapshot.currentUser.role);
+  const forceDeleteSummary = snapshot.familyExit.forceDeleteSummary;
   return <div className="account-management-page">
     <div className="account-management-heading"><div><p className="eyebrow">FAMILY ACCESS</p><h2>👥 帳號管理</h2><p>{canManageFamily ? "管理 Google 家庭成員、一次性邀請與 Child 可查看／可操作的孩子。" : "查看目前家庭，或安全離開家庭。"}</p></div>{canManageFamily && <button className="primary" onClick={openInvitationModal}>＋ 邀請成員</button>}</div>
     {error && <p className="account-management-alert" role="alert">{error}</p>}
@@ -404,11 +462,35 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
     <section className="account-section"><div className="account-section-title"><div><h3>已失效／已使用邀請</h3><p>舊 token 不會延長或重複使用。</p></div></div>{invitationHistory.length ? <div className="invitation-history">{invitationHistory.map(invitation => <article key={invitation.id}><div><strong>{invitation.role === "parent" ? "Parent" : invitation.childAccountMode === "shared" ? "Child・家庭共用" : `Child・${invitation.childName || "指定孩子"}`}</strong><small>{formatDate(invitation.createdAt)}</small></div><span className={`invite-status status-${invitation.status}`}>{statusLabel[invitation.status]}</span></article>)}</div> : <p className="account-empty">目前沒有歷史邀請。</p>}</section>
     </>}
 
-    <section className="account-section family-exit-section"><div className="account-section-title"><div><h3>離開家庭／刪除空白家庭</h3><p>目前角色：{roleLabel[snapshot.currentUser.role]}・{snapshot.family.name}</p></div></div><div className="family-exit-content">
+    <section className="account-section family-exit-section"><div className="account-section-title"><div><h3>離開家庭／刪除家庭</h3><p>目前角色：{roleLabel[snapshot.currentUser.role]}・{snapshot.family.name}</p></div></div><div className="family-exit-content">
       {snapshot.familyExit.canLeave && <><p>離開後只會解除你的家庭關係並登出；Google user 與 Auth.js 帳號資料會保留。</p><button type="button" className="family-leave-button" disabled={Boolean(busy)} onClick={() => void leaveFamily()}>{busy === "leave-family" ? "離開中…" : "離開家庭"}</button></>}
       {snapshot.familyExit.canDeleteEmptyFamily && <><p>這個家庭只有你一位 Owner，且沒有孩子、星星、任務、獎勵、紀錄、圖片或邀請資料。</p><button type="button" className="family-delete-button" disabled={Boolean(busy)} onClick={() => void deleteBlankFamily()}>{busy === "delete-empty-family" ? "刪除中…" : "刪除空白家庭"}</button></>}
-      {!snapshot.familyExit.canLeave && !snapshot.familyExit.canDeleteEmptyFamily && <p className="family-exit-blocked">🔒 {snapshot.familyExit.blockedReason || "目前無法離開或刪除這個家庭。"}</p>}
+      {snapshot.currentUser.role === "owner" && snapshot.familyExit.canForceDeleteFamily && !snapshot.familyExit.canDeleteEmptyFamily && <article className="force-delete-warning"><div><h4>強制刪除整個家庭</h4><p>此操作會永久刪除這個家庭內的所有孩子、星星、任務、獎勵、紀錄、圖片與邀請，且無法復原。</p>{snapshot.familyExit.memberCount > 1 && <strong>⚠️ 此操作將同時移除其他家庭成員。</strong>}</div><button type="button" className="force-delete-open" disabled={Boolean(busy)} onClick={openForceDeleteFamily}>永久刪除家庭</button></article>}
+      {!snapshot.familyExit.canLeave && !snapshot.familyExit.canDeleteEmptyFamily && !snapshot.familyExit.canForceDeleteFamily && <p className="family-exit-blocked">🔒 {snapshot.familyExit.blockedReason || "目前無法離開或刪除這個家庭。"}</p>}
     </div></section>
+
+    {forceDeleteModal && forceDeleteSummary && <div className="modal-back"><section className="modal force-delete-modal" role="dialog" aria-modal="true" aria-labelledby="force-delete-title">
+      <button className="close" aria-label="關閉永久刪除家庭" disabled={busy === "force-delete-family"} onClick={() => setForceDeleteModal(false)}>×</button>
+      <p className="danger-kicker">DANGER ZONE</p>
+      <h2 id="force-delete-title">永久刪除整個家庭</h2>
+      <p className="force-delete-lead">你正在永久刪除整個家庭。此操作無法復原。</p>
+      {forceDeleteSummary.memberCount > 1 && <p className="force-delete-members-warning">⚠️ 此操作將同時移除其他家庭成員。</p>}
+      <dl className="force-delete-summary">
+        <div><dt>家庭名稱</dt><dd>{snapshot.family.name}</dd></div>
+        <div><dt>目前成員數</dt><dd>{forceDeleteSummary.memberCount}</dd></div>
+        <div><dt>孩子數</dt><dd>{forceDeleteSummary.childCount}</dd></div>
+        <div><dt>星星紀錄數</dt><dd>{forceDeleteSummary.starRecordCount}</dd></div>
+        <div><dt>任務數</dt><dd>{forceDeleteSummary.taskCount}</dd></div>
+        <div><dt>任務完成紀錄</dt><dd>{forceDeleteSummary.taskCompletionRecordCount}</dd></div>
+        <div><dt>獎勵數</dt><dd>{forceDeleteSummary.rewardCount + forceDeleteSummary.specialRewardCount}</dd></div>
+        <div><dt>兌換紀錄數</dt><dd>{forceDeleteSummary.redemptionCount}</dd></div>
+        <div><dt>邀請數</dt><dd>{forceDeleteSummary.invitationCount}</dd></div>
+        <div><dt>圖片數</dt><dd>{forceDeleteSummary.imageCount}</dd></div>
+      </dl>
+      <label className="force-delete-name">請輸入完整家庭名稱：<strong>{snapshot.family.name}</strong><input autoComplete="off" value={forceDeleteName} onChange={event => setForceDeleteName(event.target.value)} aria-invalid={Boolean(forceDeleteName) && forceDeleteName !== snapshot.family.name}/></label>
+      <label className="force-delete-check"><input type="checkbox" checked={forceDeleteAcknowledged} onChange={event => setForceDeleteAcknowledged(event.target.checked)}/><span>我了解此操作會永久刪除所有家庭資料，且無法復原</span></label>
+      <button type="button" className="force-delete-confirm" disabled={busy === "force-delete-family" || forceDeleteName !== snapshot.family.name || !forceDeleteAcknowledged} onClick={() => void permanentlyDeleteFamily()}>{busy === "force-delete-family" ? "永久刪除中…" : "確認永久刪除"}</button>
+    </section></div>}
 
     {inviteModal && <div className="modal-back"><section className="modal account-invite-modal" role="dialog" aria-modal="true" aria-labelledby="invite-member-title">
       <button className="close" aria-label="關閉邀請成員" onClick={() => setInviteModal(false)}>×</button>

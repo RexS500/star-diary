@@ -1,7 +1,7 @@
 "use client";
 
 import { signIn, signOut } from "next-auth/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authCallbackPath } from "./auth-intent";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -13,10 +13,17 @@ const ERROR_MESSAGES: Record<string, string> = {
   Verification: "登入連結已失效，請重新登入。",
 };
 
-export function LoginScreen({ errorCode = "" }: { errorCode?: string }) {
+export function LoginScreen({ errorCode = "", familyDeleted = false }: { errorCode?: string; familyDeleted?: boolean }) {
   const [busy, setBusy] = useState<"create_family" | "sign_in" | "">("");
   const [localError, setLocalError] = useState("");
   const error = localError || (errorCode ? ERROR_MESSAGES[errorCode] || "Google 登入失敗，請重新嘗試。" : "");
+  useEffect(() => {
+    if (!familyDeleted) return;
+    const parameters = new URLSearchParams(window.location.search);
+    parameters.delete("family_deleted");
+    const query = parameters.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  }, [familyDeleted]);
   function googleLogin(intent: "create_family" | "sign_in") {
     setLocalError("");
     setBusy(intent);
@@ -33,6 +40,7 @@ export function LoginScreen({ errorCode = "" }: { errorCode?: string }) {
       <p className="eyebrow">FAMILY STAR JOURNAL</p>
       <h1 id="account-login-title">星星日記</h1>
       <p>使用 Google 帳號安全保存家庭的任務、星星與獎勵紀錄。</p>
+      {familyDeleted && <p className="account-login-success" role="status">家庭已永久刪除。這個 Google 帳號現在可以加入其他家庭。</p>}
       {error && <p className="account-login-error" role="alert">{error}</p>}
       <div className="login-choice-grid">
         <section className="login-choice login-choice-new">

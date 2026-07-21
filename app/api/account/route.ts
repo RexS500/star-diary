@@ -14,15 +14,20 @@ import {
   familyAccessErrorResponse,
   requireFamilyMembership,
 } from "../../family-access";
+import { createCsrfToken, csrfResponseCookie } from "../../csrf";
 
 export const dynamic = "force-dynamic";
 
 const privateHeaders = { "Cache-Control": "private, no-store" };
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const family = await requireFamilyMembership("read");
-    return Response.json(await getAccountManagementSnapshot(family), { headers: privateHeaders });
+    const csrfToken = createCsrfToken();
+    return Response.json(
+      { ...await getAccountManagementSnapshot(family), csrfToken },
+      { headers: { ...privateHeaders, "Set-Cookie": csrfResponseCookie(csrfToken, req.url) } },
+    );
   } catch (error) {
     if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);
     return accountApiErrorResponse(error);

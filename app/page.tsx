@@ -8,7 +8,7 @@ import StarHome from "./star-home";
 export const dynamic = "force-dynamic";
 
 type HomeProps = {
-  searchParams?: Promise<{ error?: string; auth_intent?: string }>;
+  searchParams?: Promise<{ error?: string; auth_intent?: string; family_deleted?: string }>;
 };
 
 export default async function Home({ searchParams }: HomeProps) {
@@ -16,7 +16,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const parameters = await searchParams;
   const authIntent = parseAuthIntent(parameters?.auth_intent);
   if (!session?.user?.id || !session.user.email) {
-    return <LoginScreen errorCode={parameters?.error || ""}/>;
+    return <LoginScreen errorCode={parameters?.error || ""} familyDeleted={parameters?.family_deleted === "1"}/>;
   }
 
   const account = {
