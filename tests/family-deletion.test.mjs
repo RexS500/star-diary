@@ -120,10 +120,12 @@ test("force-delete API derives family from session and enforces Owner, CSRF and 
   assert.match(service, /familyNameConfirmation/);
   assert.match(service, /input\.confirmed !== true/);
   assert.match(service, /env\.DB\.batch\(deletionStatements\)/);
+  assert.doesNotMatch(service, /(?:SELECT|DELETE) (?:FROM )?(?:children|star_entries|rewards|redemptions)/);
   assert.match(service, /DELETE FROM member_child_permissions/);
   assert.match(service, /DELETE FROM family_invitations/);
   assert.match(service, /DELETE FROM media_objects/);
   assert.match(service, /DELETE FROM family_state/);
+  assert.match(service, /DELETE FROM family_members/);
   assert.match(service, /DELETE FROM families/);
   assert.doesNotMatch(service.slice(service.indexOf("export async function forceDeleteCurrentFamily")), /DELETE FROM (?:users|accounts|sessions|verification_tokens)/);
   assert.match(csrf, /HttpOnly; SameSite=Strict/);

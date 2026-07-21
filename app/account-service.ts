@@ -597,16 +597,12 @@ export async function forceDeleteCurrentFamily(
   if (input.mode !== "force") throw new AccountApiError("永久刪除模式不正確", 422);
   if (input.confirmed !== true) throw new AccountApiError("請勾選永久刪除確認", 422);
 
-  const [familyResult, stateResult, membersResult, invitationsResult, mediaResult, oldChildrenResult, oldStarsResult, oldRewardsResult, oldRedemptionsResult] = await env.DB.batch([
+  const [familyResult, stateResult, membersResult, invitationsResult, mediaResult] = await env.DB.batch([
     env.DB.prepare("SELECT id, name, legacy_state FROM families WHERE id = ?").bind(family.familyId),
     env.DB.prepare("SELECT data, updated_at FROM family_state WHERE family_id = ?").bind(family.familyId),
     env.DB.prepare("SELECT COUNT(*) AS count FROM family_members WHERE family_id = ? AND status = 'active'").bind(family.familyId),
     env.DB.prepare("SELECT COUNT(*) AS count FROM family_invitations WHERE family_id = ?").bind(family.familyId),
     env.DB.prepare("SELECT object_key FROM media_objects WHERE family_id = ? ORDER BY object_key").bind(family.familyId),
-    env.DB.prepare("SELECT COUNT(*) AS count FROM children WHERE family_id = ?").bind(family.familyId),
-    env.DB.prepare("SELECT COUNT(*) AS count FROM star_entries WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
-    env.DB.prepare("SELECT COUNT(*) AS count FROM rewards WHERE family_id = ?").bind(family.familyId),
-    env.DB.prepare("SELECT COUNT(*) AS count FROM redemptions WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
   ]);
   const familyRow = familyResult.results?.[0] as FamilyExitFamilyRow | undefined;
   if (!familyRow) throw new AccountApiError("找不到目前家庭，可能已經被刪除", 404);
@@ -622,13 +618,13 @@ export async function forceDeleteCurrentFamily(
   const count = (result: D1Result) => Number((result.results?.[0] as CountRow | undefined)?.count || 0);
   const summary: FamilyDeletionSummary = {
     memberCount: count(membersResult),
-    childCount: stateSummary.childCount + count(oldChildrenResult),
-    starRecordCount: stateSummary.starRecordCount + count(oldStarsResult),
+    childCount: stateSummary.childCount,
+    starRecordCount: stateSummary.starRecordCount,
     taskCount: stateSummary.taskCount,
     taskCompletionRecordCount: stateSummary.taskCompletionRecordCount,
-    rewardCount: stateSummary.rewardCount + count(oldRewardsResult),
+    rewardCount: stateSummary.rewardCount,
     specialRewardCount: stateSummary.specialRewardCount,
-    redemptionCount: stateSummary.redemptionCount + count(oldRedemptionsResult),
+    redemptionCount: stateSummary.redemptionCount,
     quickIndicatorCount: stateSummary.quickIndicatorCount,
     invitationCount: count(invitationsResult),
     imageCount: mediaResult.results?.length || 0,
@@ -670,10 +666,9 @@ export async function forceDeleteCurrentFamily(
       deletedAt,
       JSON.stringify(summary),
     ),
-    env.DB.prepare("DELETE FROM star_entries WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
-    env.DB.prepare("DELETE FROM redemptions WHERE child_id IN (SELECT id FROM children WHERE family_id = ?)").bind(family.familyId),
-    env.DB.prepare("DELETE FROM rewards WHERE family_id = ?").bind(family.familyId),
-    env.DB.prepare("DELETE FROM children WHERE family_id = ?").bind(family.familyId),
+    // Children, tasks, completions, star records, rewards, redemptions and
+    // child-specific settings are all stored inside this family's JSON state.
+    // The production D1 schema has no separate legacy content tables.
     env.DB.prepare(
       "DELETE FROM app_state WHERE id = 'family' AND EXISTS (SELECT 1 FROM families WHERE id = ? AND legacy_state = 1)",
     ).bind(family.familyId),
@@ -681,8 +676,9 @@ export async function forceDeleteCurrentFamily(
     env.DB.prepare("DELETE FROM family_invitations WHERE family_id = ?").bind(family.familyId),
     env.DB.prepare("DELETE FROM media_objects WHERE family_id = ?").bind(family.familyId),
     env.DB.prepare("DELETE FROM family_state WHERE family_id = ?").bind(family.familyId),
-    // family_members has ON DELETE CASCADE and is deliberately removed only
-    // after the audit authorization guard has verified the current Owner.
+    // The Owner authorization was atomically captured by the audit guard, so
+    // memberships can now be removed explicitly before the family row.
+    env.DB.prepare("DELETE FROM family_members WHERE family_id = ?").bind(family.familyId),
     env.DB.prepare("DELETE FROM families WHERE id = ?").bind(family.familyId),
     // If the family row somehow remained, the invalid CHECK value aborts and
     // rolls the whole D1 batch back instead of leaving a partially deleted family.
