@@ -36,7 +36,13 @@ export async function POST(req: Request) {
     if (body.action === "create_invitation") {
       const invitation = await createFamilyInvitation(
         family,
-        { role: body.role, childId: body.childId },
+        {
+          role: body.role,
+          childId: body.childId,
+          childAccountMode: body.childAccountMode,
+          preset: body.preset,
+          permissions: body.permissions,
+        },
         new URL(req.url).origin,
       );
       return Response.json({ ok: true, invitation }, { status: 201, headers: privateHeaders });
@@ -49,10 +55,12 @@ export async function POST(req: Request) {
     if (body.action === "update_child_permissions") {
       const permissions = await updateMemberChildPermissions(family, {
         userId: body.userId,
+        childAccountMode: body.childAccountMode,
+        boundChildId: body.boundChildId,
         preset: body.preset,
         permissions: body.permissions,
       });
-      return Response.json({ ok: true, permissions }, { headers: privateHeaders });
+      return Response.json({ ok: true, ...permissions }, { headers: privateHeaders });
     }
     if (body.action === "remove_member") {
       if (typeof body.userId !== "string") throw new AccountApiError("家庭成員資料不完整", 422);

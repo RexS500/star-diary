@@ -11,6 +11,10 @@ const accountMigration = await readFile(
   new URL("../drizzle/0003_account_management_and_invitations.sql", import.meta.url),
   "utf8",
 );
+const sharedChildMigration = await readFile(
+  new URL("../drizzle/0004_shared_child_accounts.sql", import.meta.url),
+  "utf8",
+);
 
 function migratedDatabase() {
   const db = new DatabaseSync(":memory:");
@@ -24,6 +28,7 @@ function migratedDatabase() {
     .run("family", JSON.stringify({ children: [{ id: "legacy-child" }] }), 100);
   db.exec(authMigration);
   db.exec(accountMigration);
+  db.exec(sharedChildMigration);
   return db;
 }
 
@@ -96,6 +101,7 @@ test("account migration preserves legacy members and enforces one family and one
   db.prepare("INSERT INTO family_members (family_id, user_id, role, created_at) VALUES (?, ?, ?, ?)").run("family-a", "owner-user", "owner", now);
   db.prepare("INSERT INTO family_members (family_id, user_id, role, created_at) VALUES (?, ?, ?, ?)").run("family-a", "viewer-user", "viewer", now);
   db.exec(accountMigration);
+  db.exec(sharedChildMigration);
 
   assert.equal(db.prepare("SELECT role FROM family_members WHERE user_id = ?").get("owner-user").role, "owner");
   assert.equal(db.prepare("SELECT role FROM family_members WHERE user_id = ?").get("viewer-user").role, "child");
@@ -115,11 +121,11 @@ test("database invitation guards reject expired, cancelled, reused, and duplicat
   db.prepare("INSERT INTO families (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run("invite-family", "Invite", createdAt, createdAt);
   db.prepare("INSERT INTO family_members (family_id, user_id, role, child_id, created_at, updated_at, status) VALUES (?, ?, 'owner', NULL, ?, ?, 'active')").run("invite-family", "creator", createdAt, createdAt);
   const insertInvite = db.prepare(`INSERT INTO family_invitations
-    (id, family_id, token_hash, role, child_id, status, created_by_user_id, created_at, expires_at)
-    VALUES (?, 'invite-family', ?, ?, ?, ?, 'creator', ?, ?)`);
-  insertInvite.run("valid", "hash-valid", "parent", null, "pending", createdAt, expiresAt);
-  insertInvite.run("expired", "hash-expired", "parent", null, "pending", createdAt, validAt);
-  insertInvite.run("cancelled", "hash-cancelled", "parent", null, "cancelled", createdAt, expiresAt);
+    (id, family_id, token_hash, role, child_id, child_account_mode, child_permissions_json, status, created_by_user_id, created_at, expires_at)
+    VALUES (?, 'invite-family', ?, ?, ?, ?, ?, ?, 'creator', ?, ?)`);
+  insertInvite.run("valid", "hash-valid", "parent", null, null, null, "pending", createdAt, expiresAt);
+  insertInvite.run("expired", "hash-expired", "parent", null, null, null, "pending", createdAt, validAt);
+  insertInvite.run("cancelled", "hash-cancelled", "parent", null, null, null, "cancelled", createdAt, expiresAt);
 
   const accept = db.prepare(`UPDATE family_invitations
     SET status='accepted', accepted_at=?, accepted_by_user_id=?
@@ -129,10 +135,12 @@ test("database invitation guards reject expired, cancelled, reused, and duplicat
   assert.equal(accept.run(expiresAt, "acceptor", "expired", expiresAt).changes, 0);
   assert.equal(accept.run(validAt, "acceptor", "cancelled", validAt).changes, 0);
 
-  insertInvite.run("child-one", "hash-child-one", "child", "max", "pending", createdAt, expiresAt);
-  assert.throws(() => insertInvite.run("child-two", "hash-child-two", "child", "max", "pending", createdAt, expiresAt), /UNIQUE/);
+  insertInvite.run("child-one", "hash-child-one", "child", "max", "personal", "[]", "pending", createdAt, expiresAt);
+  assert.throws(() => insertInvite.run("child-two", "hash-child-two", "child", "max", "personal", "[]", "pending", createdAt, expiresAt), /UNIQUE/);
   db.prepare("UPDATE family_invitations SET status='expired' WHERE id='child-one'").run();
-  assert.doesNotThrow(() => insertInvite.run("child-three", "hash-child-three", "child", "max", "pending", createdAt, expiresAt));
+  assert.doesNotThrow(() => insertInvite.run("child-three", "hash-child-three", "child", "max", "personal", "[]", "pending", createdAt, expiresAt));
+  assert.doesNotThrow(() => insertInvite.run("shared", "hash-shared", "child", null, "shared", '[{"childId":"max","canView":true,"canOperate":true}]', "pending", createdAt, expiresAt));
+  assert.throws(() => insertInvite.run("bad-shared", "hash-bad-shared", "child", "max", "shared", "[]", "pending", createdAt, expiresAt), /CHECK/);
   db.close();
 });
 

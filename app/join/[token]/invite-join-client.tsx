@@ -7,6 +7,8 @@ type InvitationView = {
   familyName: string;
   role: "parent" | "child";
   childName: string | null;
+  childAccountMode: "personal" | "shared" | null;
+  operableChildNames: string[];
   expiresAt: string;
 };
 
@@ -64,7 +66,9 @@ export function InviteJoinClient({
       <div className="invite-join-summary">
         <p>你將加入<strong>{invitation.familyName}</strong></p>
         <p>角色<strong>{invitation.role === "parent" ? "Parent" : "Child"}</strong></p>
-        {invitation.role === "child" && <p>綁定孩子<strong>{invitation.childName || "指定孩子"}</strong></p>}
+        {invitation.role === "child" && <p>帳號模式<strong>{invitation.childAccountMode === "shared" ? "家庭共用帳號" : "個人孩子帳號"}</strong></p>}
+        {invitation.role === "child" && invitation.childAccountMode === "personal" && <p>綁定孩子<strong>{invitation.childName}</strong></p>}
+        {invitation.role === "child" && invitation.childAccountMode === "shared" && <p>可操作孩子<strong>{invitation.operableChildNames.join("、") || "目前僅可查看"}</strong></p>}
         <p>邀請剩餘時間<strong className={expired ? "is-expired" : ""}>{expired ? "已失效" : countdownLabel(remaining)}</strong></p>
       </div>
       {error && <p className="account-login-error" role="alert">{error}</p>}
@@ -81,7 +85,7 @@ export function InviteJoinClient({
         {expired ? "邀請已失效" : busy ? "正在前往 Google…" : "使用 Google 帳號登入"}
       </button>}
       {authenticated && !error && <p className="invite-accepting" role="status">{expired ? "邀請已失效" : "正在確認家庭資格與權限…"}</p>}
-      <small>角色與綁定孩子由邀請決定，登入後無法自行更換。</small>
+      <small>角色、帳號模式、綁定孩子與權限均由邀請決定，接受邀請者無法自行更換。</small>
     </section>
   </main>;
 }

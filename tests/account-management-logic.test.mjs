@@ -56,6 +56,29 @@ test("Child permission presets preserve self access and enforce operate implies 
   assert.equal(permissionPresetFor(custom, childIds, "vanessa"), "share_all");
 });
 
+test("shared Child presets do not require a bound child and still enforce operate implies view", () => {
+  const childIds = ["vanessa", "max"];
+  assert.deepEqual(normalizeChildPermissions({ childIds, boundChildId: null, preset: "share_all" }), [
+    { childId: "vanessa", canView: true, canOperate: true },
+    { childId: "max", canView: true, canOperate: true },
+  ]);
+  assert.deepEqual(normalizeChildPermissions({ childIds, boundChildId: null, preset: "view_all" }), [
+    { childId: "vanessa", canView: true, canOperate: false },
+    { childId: "max", canView: true, canOperate: false },
+  ]);
+  const custom = normalizeChildPermissions({
+    childIds,
+    boundChildId: null,
+    preset: "custom",
+    custom: [{ childId: "max", canView: false, canOperate: true }],
+  });
+  assert.deepEqual(custom, [
+    { childId: "vanessa", canView: false, canOperate: false },
+    { childId: "max", canView: true, canOperate: true },
+  ]);
+  assert.equal(permissionPresetFor(custom, childIds, null), "custom");
+});
+
 test("Owner and Parent removal rules protect the Owner role", () => {
   assert.equal(canRemoveFamilyMember("owner", "parent"), true);
   assert.equal(canRemoveFamilyMember("owner", "child"), true);

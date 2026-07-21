@@ -8,6 +8,7 @@ import {
   isFamilyManager,
   normalizeChildPermissions,
   permissionPresetFor,
+  type ChildAccountMode,
   type ChildPermission,
   type FamilyMemberRole,
   type InvitationRole,
@@ -23,6 +24,7 @@ type MemberView = {
   image: string | null;
   role: FamilyMemberRole;
   childId: string | null;
+  childAccountMode: ChildAccountMode | null;
   childName: string | null;
   joinedAt: string;
   status: "active" | "disabled";
@@ -34,6 +36,10 @@ type InvitationView = {
   role: InvitationRole;
   childId: string | null;
   childName: string | null;
+  childAccountMode: ChildAccountMode | null;
+  permissions: ChildPermission[];
+  viewableChildNames: string[];
+  operableChildNames: string[];
   status: InvitationStatus;
   createdAt: string;
   expiresAt: string;
@@ -87,7 +93,12 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
   const [inviteModal, setInviteModal] = useState(false);
   const [inviteRole, setInviteRole] = useState<InvitationRole>("parent");
   const [inviteChildId, setInviteChildId] = useState("");
+  const [inviteChildAccountMode, setInviteChildAccountMode] = useState<ChildAccountMode>("personal");
+  const [invitePermissionPreset, setInvitePermissionPreset] = useState<PermissionPreset>("share_all");
+  const [invitePermissions, setInvitePermissions] = useState<ChildPermission[]>([]);
   const [permissionMember, setPermissionMember] = useState<MemberView | null>(null);
+  const [permissionAccountMode, setPermissionAccountMode] = useState<ChildAccountMode>("personal");
+  const [permissionBoundChildId, setPermissionBoundChildId] = useState("");
   const [permissionPreset, setPermissionPreset] = useState<PermissionPreset>("only_self");
   const [customPermissions, setCustomPermissions] = useState<ChildPermission[]>([]);
 
@@ -100,6 +111,7 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
       if (!response.ok) throw new Error(result.error || "無法讀取帳號資料");
       setSnapshot(result);
       setInviteChildId(current => current || result.children[0]?.id || "");
+      setInvitePermissions(current => current.length ? current : normalizeChildPermissions({ childIds: result.children.map(child => child.id), boundChildId: null, preset: "share_all" }));
     } catch (value) {
       setError(value instanceof Error ? value.message : "無法讀取帳號資料");
     } finally {
@@ -116,6 +128,7 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
         if (!active) return;
         setSnapshot(result);
         setInviteChildId(result.children[0]?.id || "");
+        setInvitePermissions(normalizeChildPermissions({ childIds: result.children.map(child => child.id), boundChildId: null, preset: "share_all" }));
       })
       .catch(value => { if (active) setError(value instanceof Error ? value.message : "無法讀取帳號資料"); })
       .finally(() => { if (active) setLoading(false); });
@@ -145,12 +158,60 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
     return result;
   }
 
+  function openInvitationModal() {
+    if (!snapshot) return;
+    setInviteRole("parent");
+    setInviteChildAccountMode("personal");
+    setInviteChildId(snapshot.children[0]?.id || "");
+    setInvitePermissionPreset("share_all");
+    setInvitePermissions(normalizeChildPermissions({ childIds: snapshot.children.map(child => child.id), boundChildId: null, preset: "share_all" }));
+    setError("");
+    setInviteModal(true);
+  }
+
+  function selectInviteAccountMode(mode: ChildAccountMode) {
+    if (!snapshot) return;
+    setInviteChildAccountMode(mode);
+    if (mode === "personal") {
+      setInviteChildId(current => current || snapshot.children[0]?.id || "");
+      return;
+    }
+    setInviteChildId("");
+    setInvitePermissionPreset("share_all");
+    setInvitePermissions(normalizeChildPermissions({ childIds: snapshot.children.map(child => child.id), boundChildId: null, preset: "share_all" }));
+  }
+
+  function selectInvitePermissionPreset(preset: Exclude<PermissionPreset, "only_self">) {
+    if (!snapshot) return;
+    setInvitePermissionPreset(preset);
+    if (preset !== "custom") {
+      setInvitePermissions(normalizeChildPermissions({ childIds: snapshot.children.map(child => child.id), boundChildId: null, preset }));
+    }
+  }
+
+  function updateInvitePermission(childId: string, field: "canView" | "canOperate", checked: boolean) {
+    setInvitePermissionPreset("custom");
+    setInvitePermissions(current => current.map(permission => {
+      if (permission.childId !== childId) return permission;
+      if (field === "canOperate") return { ...permission, canOperate: checked, canView: checked || permission.canView };
+      return { ...permission, canView: checked, canOperate: checked ? permission.canOperate : false };
+    }));
+  }
+
   async function createInvitation() {
-    if (inviteRole === "child" && !inviteChildId) return setError("請選擇要綁定的孩子");
+    if (inviteRole === "child" && inviteChildAccountMode === "personal" && !inviteChildId) return setError("請選擇要綁定的孩子");
+    if (inviteRole === "child" && inviteChildAccountMode === "shared" && !invitePermissions.some(permission => permission.canView)) return setError("請至少設定一位可查看的孩子");
     setBusy("create");
     setError("");
     try {
-      const result = await post({ action: "create_invitation", role: inviteRole, childId: inviteRole === "child" ? inviteChildId : undefined });
+      const result = await post({
+        action: "create_invitation",
+        role: inviteRole,
+        childAccountMode: inviteRole === "child" ? inviteChildAccountMode : undefined,
+        childId: inviteRole === "child" && inviteChildAccountMode === "personal" ? inviteChildId : undefined,
+        preset: inviteRole === "child" ? (inviteChildAccountMode === "shared" ? invitePermissionPreset : "only_self") : undefined,
+        permissions: inviteRole === "child" && inviteChildAccountMode === "shared" && invitePermissionPreset === "custom" ? invitePermissions : undefined,
+      });
       if (!result.invitation) throw new Error("邀請建立失敗");
       setSnapshot(current => current ? { ...current, activeInvitations: [result.invitation!, ...current.activeInvitations] } : current);
       setInviteModal(false);
@@ -201,12 +262,42 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
   }
 
   function openPermissions(member: MemberView) {
-    if (!snapshot || !member.childId) return;
+    if (!snapshot || member.role !== "child") return;
     const childIds = snapshot.children.map(child => child.id);
-    const preset = permissionPresetFor(member.permissions, childIds, member.childId);
+    const mode = member.childAccountMode || (member.childId ? "personal" : "shared");
+    const boundChildId = mode === "personal" ? member.childId || snapshot.children[0]?.id || "" : "";
+    const preset = permissionPresetFor(member.permissions, childIds, boundChildId || null);
     setPermissionMember(member);
-    setPermissionPreset(preset);
-    setCustomPermissions(normalizeChildPermissions({ childIds, boundChildId: member.childId, preset: "custom", custom: member.permissions }));
+    setPermissionAccountMode(mode);
+    setPermissionBoundChildId(boundChildId);
+    setPermissionPreset(mode === "shared" && preset === "only_self" ? "custom" : preset);
+    setCustomPermissions(normalizeChildPermissions({ childIds, boundChildId: boundChildId || null, preset: "custom", custom: member.permissions }));
+  }
+
+  function selectPermissionAccountMode(mode: ChildAccountMode) {
+    if (!snapshot || !permissionMember) return;
+    setPermissionAccountMode(mode);
+    if (mode === "shared") {
+      setPermissionBoundChildId("");
+      setPermissionPreset("share_all");
+      setCustomPermissions(normalizeChildPermissions({ childIds: snapshot.children.map(child => child.id), boundChildId: null, preset: "share_all" }));
+      return;
+    }
+    const boundChildId = permissionMember.childId || snapshot.children[0]?.id || "";
+    setPermissionBoundChildId(boundChildId);
+    setPermissionPreset("only_self");
+    setCustomPermissions(normalizeChildPermissions({ childIds: snapshot.children.map(child => child.id), boundChildId, preset: "only_self" }));
+  }
+
+  function selectPermissionBoundChild(childId: string) {
+    if (!snapshot) return;
+    setPermissionBoundChildId(childId);
+    setCustomPermissions(current => normalizeChildPermissions({
+      childIds: snapshot.children.map(child => child.id),
+      boundChildId: childId,
+      preset: permissionPreset,
+      custom: current,
+    }));
   }
 
   function updateCustomPermission(childId: string, field: "canView" | "canOperate", checked: boolean) {
@@ -219,12 +310,16 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
   }
 
   async function savePermissions() {
-    if (!permissionMember) return;
+    if (!permissionMember || !snapshot) return;
+    if (permissionAccountMode === "personal" && !permissionBoundChildId) return onMessage("請選擇要綁定的孩子");
+    if (permissionAccountMode === "shared" && !customPermissions.some(permission => permission.canView)) return onMessage("請至少設定一位可查看的孩子");
     setBusy(`permissions-${permissionMember.userId}`);
     try {
       await post({
         action: "update_child_permissions",
         userId: permissionMember.userId,
+        childAccountMode: permissionAccountMode,
+        boundChildId: permissionAccountMode === "personal" ? permissionBoundChildId : undefined,
         preset: permissionPreset,
         permissions: permissionPreset === "custom" ? customPermissions : undefined,
       });
@@ -288,24 +383,24 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
 
   const canManageFamily = isFamilyManager(snapshot.currentUser.role);
   return <div className="account-management-page">
-    <div className="account-management-heading"><div><p className="eyebrow">FAMILY ACCESS</p><h2>👥 帳號管理</h2><p>{canManageFamily ? "管理 Google 家庭成員、一次性邀請與 Child 可查看／可操作的孩子。" : "查看目前家庭，或安全離開家庭。"}</p></div>{canManageFamily && <button className="primary" onClick={() => setInviteModal(true)}>＋ 邀請成員</button>}</div>
+    <div className="account-management-heading"><div><p className="eyebrow">FAMILY ACCESS</p><h2>👥 帳號管理</h2><p>{canManageFamily ? "管理 Google 家庭成員、一次性邀請與 Child 可查看／可操作的孩子。" : "查看目前家庭，或安全離開家庭。"}</p></div>{canManageFamily && <button className="primary" onClick={openInvitationModal}>＋ 邀請成員</button>}</div>
     {error && <p className="account-management-alert" role="alert">{error}</p>}
 
     {canManageFamily && <>
     <section className="account-section"><div className="account-section-title"><div><h3>家庭成員</h3><p>{snapshot.family.name}・共 {snapshot.members.length} 位</p></div></div><div className="family-member-list">{snapshot.members.map(member => <article className="family-member-card" key={member.userId}>
       <div className="member-identity">{member.image ? <img src={member.image} alt="" referrerPolicy="no-referrer"/> : <span aria-hidden="true">G</span>}<div><strong>{member.name}</strong><small>{member.email}</small></div></div>
-      <div className="member-meta"><span className={`member-role role-${member.role}`}>{roleLabel[member.role]}</span><span>{member.status === "active" ? "啟用中" : "已停用"}</span>{member.role === "child" && <span>綁定孩子：{member.childName || "未綁定"}</span>}<small>加入時間：{formatDate(member.joinedAt)}</small></div>
+      <div className="member-meta"><span className={`member-role role-${member.role}`}>{roleLabel[member.role]}</span><span>{member.status === "active" ? "啟用中" : "已停用"}</span>{member.role === "child" && <><span>帳號模式：{member.childAccountMode === "shared" ? "家庭共用帳號" : "個人孩子帳號"}</span>{member.childAccountMode === "shared" ? <span>可操作孩子：{snapshot.children.filter(child => member.permissions.some(permission => permission.childId === child.id && permission.canOperate)).map(child => child.name).join("、") || "尚未設定"}</span> : <span>綁定孩子：{member.childName || "尚未設定"}</span>}</>}<small>加入時間：{formatDate(member.joinedAt)}</small></div>
       <div className="member-actions">{member.role === "child" && <button disabled={Boolean(busy)} onClick={() => openPermissions(member)}>編輯權限</button>}{canRemoveFamilyMember(snapshot.currentUser.role, member.role) && <button className="danger" disabled={Boolean(busy)} onClick={() => void removeMember(member)}>{busy === `remove-${member.userId}` ? "移除中…" : "移除成員"}</button>}</div>
     </article>)}</div></section>
 
     <section className="account-section"><div className="account-section-title"><div><h3>有效邀請</h3><p>邀請建立後 10 分鐘失效，且只能使用一次。</p></div></div>{activeInvitations.length ? <div className="invitation-list">{activeInvitations.map(invitation => <article className="invitation-card is-active" key={invitation.id}>
-      <div><strong>{invitation.role === "parent" ? "Parent 邀請" : "Child 邀請"}</strong>{invitation.childName && <span>綁定：{invitation.childName}</span>}<small>建立：{formatDate(invitation.createdAt)}</small></div>
+      <div><strong>{invitation.role === "parent" ? "Parent 邀請" : "Child 邀請"}</strong>{invitation.role === "child" && (invitation.childAccountMode === "shared" ? <span>家庭共用・可操作：{invitation.operableChildNames.join("、") || "尚未設定"}</span> : <span>個人帳號・綁定：{invitation.childName}</span>)}<small>建立：{formatDate(invitation.createdAt)}</small></div>
       <div className="invitation-countdown"><span>剩餘</span><strong>{clock ? countdownLabel(invitation.expiresAt, clock) : "10:00"}</strong></div>
       {invitation.inviteUrl ? <input readOnly value={invitation.inviteUrl} aria-label="完整邀請網址" onFocus={event => event.currentTarget.select()}/> : <p className="invite-link-once">為保護安全，連結只在建立當下顯示。</p>}
       <div className="invitation-actions"><button disabled={!invitation.inviteUrl} onClick={() => void copyInvitation(invitation)}>複製連結</button><button disabled={!invitation.inviteUrl} onClick={() => void shareInvitation(invitation)}>分享邀請</button><button className="danger" disabled={busy === invitation.id} onClick={() => void cancelInvitation(invitation)}>{busy === invitation.id ? "取消中…" : "取消邀請"}</button></div>
     </article>)}</div> : <p className="account-empty">目前沒有有效邀請。</p>}</section>
 
-    <section className="account-section"><div className="account-section-title"><div><h3>已失效／已使用邀請</h3><p>舊 token 不會延長或重複使用。</p></div></div>{invitationHistory.length ? <div className="invitation-history">{invitationHistory.map(invitation => <article key={invitation.id}><div><strong>{invitation.role === "parent" ? "Parent" : `Child・${invitation.childName || "指定孩子"}`}</strong><small>{formatDate(invitation.createdAt)}</small></div><span className={`invite-status status-${invitation.status}`}>{statusLabel[invitation.status]}</span></article>)}</div> : <p className="account-empty">目前沒有歷史邀請。</p>}</section>
+    <section className="account-section"><div className="account-section-title"><div><h3>已失效／已使用邀請</h3><p>舊 token 不會延長或重複使用。</p></div></div>{invitationHistory.length ? <div className="invitation-history">{invitationHistory.map(invitation => <article key={invitation.id}><div><strong>{invitation.role === "parent" ? "Parent" : invitation.childAccountMode === "shared" ? "Child・家庭共用" : `Child・${invitation.childName || "指定孩子"}`}</strong><small>{formatDate(invitation.createdAt)}</small></div><span className={`invite-status status-${invitation.status}`}>{statusLabel[invitation.status]}</span></article>)}</div> : <p className="account-empty">目前沒有歷史邀請。</p>}</section>
     </>}
 
     <section className="account-section family-exit-section"><div className="account-section-title"><div><h3>離開家庭／刪除空白家庭</h3><p>目前角色：{roleLabel[snapshot.currentUser.role]}・{snapshot.family.name}</p></div></div><div className="family-exit-content">
@@ -314,17 +409,52 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
       {!snapshot.familyExit.canLeave && !snapshot.familyExit.canDeleteEmptyFamily && <p className="family-exit-blocked">🔒 {snapshot.familyExit.blockedReason || "目前無法離開或刪除這個家庭。"}</p>}
     </div></section>
 
-    {inviteModal && <div className="modal-back"><section className="modal account-invite-modal" role="dialog" aria-modal="true" aria-labelledby="invite-member-title"><button className="close" aria-label="關閉邀請成員" onClick={() => setInviteModal(false)}>×</button><h2 id="invite-member-title">邀請成員</h2><fieldset><legend>請選擇角色</legend><div className="invite-role-options"><button aria-pressed={inviteRole === "parent"} onClick={() => setInviteRole("parent")}><strong>Parent</strong><span>可管理孩子、任務、星星與 Child 權限</span></button><button aria-pressed={inviteRole === "child"} onClick={() => setInviteRole("child")}><strong>Child</strong><span>依權限查看與操作孩子端功能</span></button></div></fieldset>{inviteRole === "child" && <label>綁定既有孩子<select value={inviteChildId} onChange={event => setInviteChildId(event.target.value)}>{snapshot.children.map(child => <option value={child.id} key={child.id}>{child.name}</option>)}</select></label>}<p className="invite-expiry-note">🔒 連結使用 32 bytes 隨機 token，10 分鐘後自動失效。</p><button className="save" disabled={busy === "create"} onClick={() => void createInvitation()}>{busy === "create" ? "建立中…" : "建立一次性邀請"}</button></section></div>}
+    {inviteModal && <div className="modal-back"><section className="modal account-invite-modal" role="dialog" aria-modal="true" aria-labelledby="invite-member-title">
+      <button className="close" aria-label="關閉邀請成員" onClick={() => setInviteModal(false)}>×</button>
+      <h2 id="invite-member-title">邀請成員</h2>
+      <fieldset><legend>請選擇角色</legend><div className="invite-role-options"><button aria-pressed={inviteRole === "parent"} onClick={() => setInviteRole("parent")}><strong>Parent</strong><span>可管理孩子、任務、星星與 Child 權限</span></button><button aria-pressed={inviteRole === "child"} onClick={() => setInviteRole("child")}><strong>Child</strong><span>依權限查看與操作孩子端功能</span></button></div></fieldset>
+      {inviteRole === "child" && <>
+        <fieldset><legend>帳號使用方式</legend><div className="child-account-mode-options">
+          <button aria-pressed={inviteChildAccountMode === "personal"} onClick={() => selectInviteAccountMode("personal")}><strong>綁定特定孩子</strong><span>此 Google 帳號主要屬於一位孩子</span></button>
+          <button aria-pressed={inviteChildAccountMode === "shared"} onClick={() => selectInviteAccountMode("shared")}><strong>家庭共用帳號</strong><span>此裝置由多位孩子共同使用，不綁定特定孩子</span></button>
+        </div></fieldset>
+        {inviteChildAccountMode === "personal" ? <label>綁定孩子<select value={inviteChildId} onChange={event => setInviteChildId(event.target.value)}>{snapshot.children.map(child => <option value={child.id} key={child.id}>{child.name}</option>)}</select></label> : <>
+          <p className="shared-account-note">此帳號不綁定特定孩子，登入後可切換並操作家長允許的孩子資料。</p>
+          <div className="permission-presets">{([ ["share_all", "兄弟姊妹共用"], ["view_all", "可查看全部"], ["custom", "自訂"] ] as Array<[Exclude<PermissionPreset, "only_self">, string]>).map(([value, label]) => <button key={value} aria-pressed={invitePermissionPreset === value} onClick={() => selectInvitePermissionPreset(value)}>{label}</button>)}</div>
+          <div className="permission-grid"><div className="permission-grid-head"><span>孩子</span><span>可查看</span><span>可操作</span></div>{snapshot.children.map(child => {
+            const permission = invitePermissions.find(item => item.childId === child.id) || { childId: child.id, canView: false, canOperate: false };
+            return <div className="permission-row" key={child.id}><strong>{child.name}</strong><label><input type="checkbox" checked={permission.canView} disabled={invitePermissionPreset !== "custom"} onChange={event => updateInvitePermission(child.id, "canView", event.target.checked)}/><span>可查看</span></label><label><input type="checkbox" checked={permission.canOperate} disabled={invitePermissionPreset !== "custom"} onChange={event => updateInvitePermission(child.id, "canOperate", event.target.checked)}/><span>可操作</span></label></div>;
+          })}</div>
+        </>}
+      </>}
+      <p className="invite-expiry-note">🔒 連結使用 32 bytes 隨機 token，10 分鐘後自動失效。</p>
+      <button className="save" disabled={busy === "create"} onClick={() => void createInvitation()}>{busy === "create" ? "建立中…" : "建立一次性邀請"}</button>
+    </section></div>}
 
-    {permissionMember && permissionMember.childId && <div className="modal-back"><section className="modal child-permission-modal" role="dialog" aria-modal="true" aria-labelledby="child-permission-title"><button className="close" aria-label="關閉權限設定" onClick={() => setPermissionMember(null)}>×</button><h2 id="child-permission-title">Child 權限設定</h2><p><strong>{permissionMember.name}</strong>・綁定 {permissionMember.childName}</p><div className="permission-presets">{([
-      ["only_self", "只能自己"], ["share_all", "兄弟姊妹共用"], ["view_all", "可查看全部"], ["custom", "自訂"],
-    ] as Array<[PermissionPreset, string]>).map(([value, label]) => <button key={value} aria-pressed={permissionPreset === value} onClick={() => {
-      setPermissionPreset(value);
-      if (value !== "custom") setCustomPermissions(normalizeChildPermissions({ childIds: snapshot.children.map(child => child.id), boundChildId: permissionMember.childId!, preset: value }));
-    }}>{label}</button>)}</div><div className="permission-grid"><div className="permission-grid-head"><span>孩子</span><span>可查看</span><span>可操作</span></div>{snapshot.children.map(child => {
-      const permission = customPermissions.find(item => item.childId === child.id) || { childId: child.id, canView: false, canOperate: false };
-      const isSelf = child.id === permissionMember.childId;
-      return <div className="permission-row" key={child.id}><strong>{child.name}{isSelf && <small>綁定</small>}</strong><label><input type="checkbox" checked={permission.canView} disabled={isSelf || permissionPreset !== "custom"} onChange={event => updateCustomPermission(child.id, "canView", event.target.checked)}/><span>可查看</span></label><label><input type="checkbox" checked={permission.canOperate} disabled={isSelf || permissionPreset !== "custom"} onChange={event => updateCustomPermission(child.id, "canOperate", event.target.checked)}/><span>可操作</span></label></div>;
-    })}</div><p className="permission-rule-note">可操作會自動包含可查看；綁定孩子會保留查看與操作權限。</p><button className="save" disabled={busy === `permissions-${permissionMember.userId}`} onClick={() => void savePermissions()}>{busy === `permissions-${permissionMember.userId}` ? "儲存中…" : "儲存權限"}</button></section></div>}
+    {permissionMember && <div className="modal-back"><section className="modal child-permission-modal" role="dialog" aria-modal="true" aria-labelledby="child-permission-title">
+      <button className="close" aria-label="關閉權限設定" onClick={() => setPermissionMember(null)}>×</button>
+      <h2 id="child-permission-title">Child 帳號與權限</h2>
+      <p><strong>{permissionMember.name}</strong>・{permissionMember.email}</p>
+      <fieldset><legend>帳號使用方式</legend><div className="child-account-mode-options">
+        <button aria-pressed={permissionAccountMode === "personal"} onClick={() => selectPermissionAccountMode("personal")}><strong>綁定特定孩子</strong><span>個人孩子帳號</span></button>
+        <button aria-pressed={permissionAccountMode === "shared"} onClick={() => selectPermissionAccountMode("shared")}><strong>家庭共用帳號</strong><span>多人共用裝置</span></button>
+      </div></fieldset>
+      {permissionAccountMode === "personal" && <label className="permission-bound-child">綁定孩子<select value={permissionBoundChildId} onChange={event => selectPermissionBoundChild(event.target.value)}>{snapshot.children.map(child => <option value={child.id} key={child.id}>{child.name}</option>)}</select></label>}
+      {permissionAccountMode === "shared" && <p className="shared-account-note">不綁定特定孩子；此帳號只能切換下方允許查看的孩子，且只能操作允許操作的孩子。</p>}
+      <div className="permission-presets">{([
+        ...(permissionAccountMode === "personal" ? [["only_self", "只能自己"]] : []),
+        ["share_all", "兄弟姊妹共用"], ["view_all", "可查看全部"], ["custom", "自訂"],
+      ] as Array<[PermissionPreset, string]>).map(([value, label]) => <button key={value} aria-pressed={permissionPreset === value} onClick={() => {
+        setPermissionPreset(value);
+        if (value !== "custom") setCustomPermissions(normalizeChildPermissions({ childIds: snapshot.children.map(child => child.id), boundChildId: permissionAccountMode === "personal" ? permissionBoundChildId : null, preset: value }));
+      }}>{label}</button>)}</div>
+      <div className="permission-grid"><div className="permission-grid-head"><span>孩子</span><span>可查看</span><span>可操作</span></div>{snapshot.children.map(child => {
+        const permission = customPermissions.find(item => item.childId === child.id) || { childId: child.id, canView: false, canOperate: false };
+        const isSelf = permissionAccountMode === "personal" && child.id === permissionBoundChildId;
+        return <div className="permission-row" key={child.id}><strong>{child.name}{isSelf && <small>綁定</small>}</strong><label><input type="checkbox" checked={permission.canView} disabled={isSelf || permissionPreset !== "custom"} onChange={event => updateCustomPermission(child.id, "canView", event.target.checked)}/><span>可查看</span></label><label><input type="checkbox" checked={permission.canOperate} disabled={isSelf || permissionPreset !== "custom"} onChange={event => updateCustomPermission(child.id, "canOperate", event.target.checked)}/><span>可操作</span></label></div>;
+      })}</div>
+      <p className="permission-rule-note">可操作會自動包含可查看；個人帳號綁定的孩子會保留查看與操作權限。變更後重新整理即可套用。</p>
+      <button className="save" disabled={busy === `permissions-${permissionMember.userId}`} onClick={() => void savePermissions()}>{busy === `permissions-${permissionMember.userId}` ? "儲存中…" : "儲存帳號與權限"}</button>
+    </section></div>}
   </div>;
 }

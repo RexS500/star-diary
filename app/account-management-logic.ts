@@ -3,6 +3,7 @@ export const INVITATION_TTL_MS = 10 * 60 * 1000;
 export type FamilyMemberRole = "owner" | "parent" | "child";
 export type InvitationRole = "parent" | "child";
 export type InvitationStatus = "pending" | "accepted" | "expired" | "cancelled";
+export type ChildAccountMode = "personal" | "shared";
 export type PermissionPreset = "only_self" | "share_all" | "view_all" | "custom";
 
 const EMPTY_ARRAY_STATE_KEYS = [
@@ -104,7 +105,7 @@ export function isEmptyFamilyState(raw: string | null | undefined) {
 
 export function normalizeChildPermissions(options: {
   childIds: string[];
-  boundChildId: string;
+  boundChildId: string | null;
   preset: PermissionPreset;
   custom?: ChildPermission[];
 }): ChildPermission[] {
@@ -125,14 +126,14 @@ export function normalizeChildPermissions(options: {
 export function permissionPresetFor(
   permissions: ChildPermission[],
   childIds: string[],
-  boundChildId: string,
+  boundChildId: string | null,
 ): PermissionPreset {
   const normalized = normalizeChildPermissions({ childIds, boundChildId, preset: "custom", custom: permissions });
   const matches = (preset: Exclude<PermissionPreset, "custom">) => {
     const expected = normalizeChildPermissions({ childIds, boundChildId, preset });
     return expected.every((value, index) => value.childId === normalized[index]?.childId && value.canView === normalized[index]?.canView && value.canOperate === normalized[index]?.canOperate);
   };
-  if (matches("only_self")) return "only_self";
+  if (boundChildId && matches("only_self")) return "only_self";
   if (matches("share_all")) return "share_all";
   if (matches("view_all")) return "view_all";
   return "custom";

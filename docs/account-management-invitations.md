@@ -8,6 +8,11 @@
 - `parent`：完整家庭功能；可邀請 Parent／Child、設定 Child 權限、移除 Child，不能移除 Owner 或 Parent。
 - `child`：只能收到獲准 `can_view` 的孩子資料；只有 `can_operate` 的孩子可提交每日任務與兌換。不能加／扣星、進入家長模式、儲存家庭設定或管理其他帳號，但可在「帳號管理」解除自己的家庭關係。
 
+Child 帳號有兩種使用方式，但角色都仍是 `child`：
+
+- `personal`：`child_id` 必填，綁定孩子永遠保留 `can_view = 1`、`can_operate = 1`；其他孩子仍可由家長另外授權。
+- `shared`：`child_id` 必須為 `NULL`，適合多位孩子共用裝置；至少要有一位 `can_view = 1` 的孩子，能否操作則逐一由 `member_child_permissions` 決定。
+
 所有寫入都由 Worker 依 Auth.js Session 取得 `user_id` 與 `family_id`。前端沒有可指定 `family_id`、角色或邀請綁定孩子的欄位。涉及孩子的 Child 操作會再次查詢 `member_child_permissions`。
 
 ## Migration 0003
@@ -24,13 +29,25 @@
 
 `0003` 是一次性 schema migration，不要重複執行。
 
+## Migration 0004
+
+檔案：`drizzle/0004_shared_child_accounts.sql`
+
+- `family_members` 新增 `child_account_mode`；現有有 `child_id` 的 Child 安全標記為 `personal`，不會自動改成 shared。
+- `family_invitations` 新增 `child_account_mode` 與 `child_permissions_json`。邀請接受時，模式、綁定孩子及初始權限都從伺服器邀請列讀取。
+- personal Child 必須有 `child_id`；shared Child 必須沒有 `child_id`。SQLite CHECK 與 service layer 會同時驗證。
+- shared 邀請預設「兄弟姊妹共用」，也可選擇「可查看全部」或逐一自訂；`can_operate = 1` 一定會自動包含 `can_view = 1`。
+- Owner／Parent 可直接將既有 Child membership 在 personal／shared 間切換，不刪除 Google user、不建立重複 membership，也不需要重新邀請。
+
+`0004` 必須在 `0003` 後執行，且必須先完成正式 D1 備份。
+
 ## 邀請安全設計
 
 1. Worker 使用 Web Crypto 產生 32 bytes 隨機值，編碼成 43 字元 URL-safe Base64。
 2. 明文 token 只存在新建立的 `/join/{token}` 網址並只回傳一次。
 3. D1 只保存 SHA-256 `token_hash`，不保存明文 token。
 4. 有效期固定 10 分鐘。前端倒數只供顯示；讀取與接受 API 都以伺服器時間重新檢查 `status = pending` 與 `expires_at`。
-5. 接受邀請使用 D1 batch transaction，先條件式將邀請標為 accepted，再從該邀請列複製角色與 `child_id` 建立 membership；瀏覽器不能改角色或孩子。
+5. 接受邀請使用 D1 batch transaction，先條件式將邀請標為 accepted，再從該邀請列複製角色、`child_account_mode` 與 `child_id` 建立 membership，並寫入邀請保存的 Child 權限；瀏覽器不能改角色、模式、孩子或權限。
 6. unique constraint 防止同一帳號加入多家庭與同一孩子重複綁定；已使用、取消、過期 token 都會拒絕。
 
 ## API 路由
@@ -68,6 +85,7 @@ pnpm install --frozen-lockfile
 pnpm run build
 pnpm run db:auth:migrate:local
 pnpm run db:account:migrate:local
+pnpm run db:shared-child:migrate:local
 pnpm run verify
 ```
 
@@ -84,9 +102,11 @@ pnpm exec wrangler d1 execute DB --remote --config dist/server/wrangler.json --c
 pnpm exec wrangler d1 execute DB --remote --config dist/server/wrangler.json --file drizzle/0003_account_management_and_invitations.sql
 pnpm exec wrangler d1 execute DB --remote --config dist/server/wrangler.json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('family_invitations','member_child_permissions') ORDER BY name"
 pnpm exec wrangler d1 execute DB --remote --config dist/server/wrangler.json --command "SELECT version, applied_at FROM app_migrations WHERE version='0003_account_management_and_invitations'"
+pnpm exec wrangler d1 execute DB --remote --config dist/server/wrangler.json --file drizzle/0004_shared_child_accounts.sql
+pnpm exec wrangler d1 execute DB --remote --config dist/server/wrangler.json --command "SELECT version, applied_at FROM app_migrations WHERE version='0004_shared_child_accounts'"
 ```
 
-確認備份不是 0 bytes、`0002` 已存在、正式資料庫 binding 的 `database_id` 正確，再執行 `0003`。Migration 成功後才部署包含新 SQL 查詢的 Worker，避免新版先上線卻找不到資料表。
+確認備份不是 0 bytes、`0002`／`0003` 已存在、正式資料庫 binding 的 `database_id` 正確，再執行 `0004`。Migration 成功後才部署包含新欄位查詢的 Worker，避免新版先上線卻找不到欄位。
 
 正式 Worker 可由 Cloudflare 連接的 GitHub `main` 自動部署；若使用手動 Wrangler：
 
@@ -101,13 +121,15 @@ pnpm exec wrangler deploy --config dist/server/wrangler.json
 
 1. Owner 開啟「帳號管理」，建立 Parent 邀請並確認 10 分鐘倒數、複製與分享。
 2. 無痕視窗開啟邀請，選另一個 Google 帳號，確認加入為 Parent。
-3. 建立 Child 邀請並指定既有孩子，確認不能替已綁定孩子重複建邀請。
-4. Child 登入後只看得到預設綁定孩子，能完成任務與送出兌換，但看不到家長模式與快速加扣星；帳號管理只顯示自己的離開家庭操作。
-5. 依序切換「兄弟姊妹共用」「可查看全部」「自訂」，確認切換孩子、查看與操作權限同步生效。
-6. 取消邀請、等待測試邀請到期、重開已使用連結，確認 API 均拒絕。
-7. 點「切換帳號」，確認 Auth.js 登出後 Google 顯示帳號選擇器；「切換查看孩子」不會登出。
-8. Parent／Child 點「離開家庭」，確認只解除自己並登出；Owner 有成員或資料時按鈕必須被後端阻擋。
-9. 使用全新空白 Owner 家庭確認「刪除空白家庭」需二次確認；新增任一孩子、紀錄、任務、獎勵、圖片或邀請後都不可刪除。
+3. 建立 personal Child 邀請並指定既有孩子，確認不能替已綁定孩子重複建邀請。
+4. 建立 shared Child 邀請，確認不需綁定孩子，邀請頁顯示家庭共用模式及可操作孩子，接受後 `child_id` 為 `NULL`。
+5. Child 登入後只能切換 `can_view` 的孩子，只能操作 `can_operate` 的孩子，且看不到家長模式與快速加扣星；帳號管理只顯示自己的離開家庭操作。
+6. 將既有 personal Child 改成 shared，再改回 personal，確認 membership 與 Google user 不變，重新整理後權限立即生效。
+7. 依序切換「兄弟姊妹共用」「可查看全部」「自訂」，確認切換孩子、查看與操作權限同步生效。
+8. 取消邀請、等待測試邀請到期、重開已使用連結，確認 API 均拒絕。
+9. 點「切換帳號」，確認 Auth.js 登出後 Google 顯示帳號選擇器；「切換查看孩子」不會登出。
+10. Parent／Child 點「離開家庭」，確認只解除自己並登出；Owner 有成員或資料時按鈕必須被後端阻擋。
+11. 使用全新空白 Owner 家庭確認「刪除空白家庭」需二次確認；新增任一孩子、紀錄、任務、獎勵、圖片或邀請後都不可刪除。
 
 ## 回復策略
 

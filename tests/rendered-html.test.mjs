@@ -10,7 +10,7 @@ test("Star Diary keeps its production metadata and application shell", async () 
   ]);
   assert.match(layout, /lang="zh-Hant"/);
   assert.match(layout, /title:\s*"星星日記｜家庭獎勵追蹤"/);
-  assert.match(page, /<StarHome account=\{\{ \.\.\.account, role: familyAccess\.role, boundChildId: familyAccess\.boundChildId \}\}\s*\/>/);
+  assert.match(page, /<StarHome account=\{\{[\s\S]*role: familyAccess\.role,[\s\S]*boundChildId: familyAccess\.boundChildId,[\s\S]*childAccountMode: familyAccess\.childAccountMode,[\s\S]*\}\}\/>/);
   assert.match(page, /const session = await auth\(\)/);
   assert.match(page, /<LoginScreen/);
   assert.match(home, /正在載入家庭資料/);

@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit --incremental false",
     "db:auth:migrate:local": "wrangler d1 execute DB --config dist/server/wrangler.json --local --persist-to .wrangler/state --file drizzle/0002_auth_and_family_scope.sql",
     "db:account:migrate:local": "wrangler d1 execute DB --config dist/server/wrangler.json --local --persist-to .wrangler/state --file drizzle/0003_account_management_and_invitations.sql",
+    "db:shared-child:migrate:local": "wrangler d1 execute DB --config dist/server/wrangler.json --local --persist-to .wrangler/state --file drizzle/0004_shared_child_accounts.sql",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

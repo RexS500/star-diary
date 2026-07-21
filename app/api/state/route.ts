@@ -384,6 +384,7 @@ function accessPayload(
         access: {
             role: family.role,
             boundChildId: family.boundChildId,
+            childAccountMode: family.childAccountMode,
             permissions,
         },
     };

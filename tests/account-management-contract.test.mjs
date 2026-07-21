@@ -7,6 +7,7 @@ const read = path => readFile(new URL(path, root), "utf8");
 
 test("migration stores only invite hashes and enforces membership and child binding uniqueness", async () => {
   const migration = await read("drizzle/0003_account_management_and_invitations.sql");
+  const sharedMigration = await read("drizzle/0004_shared_child_accounts.sql");
   assert.match(migration, /CREATE TABLE "family_invitations"/);
   assert.match(migration, /"token_hash" text NOT NULL/);
   assert.doesNotMatch(migration, /"token" text/);
@@ -15,6 +16,10 @@ test("migration stores only invite hashes and enforces membership and child bind
   assert.match(migration, /family_invitations_pending_child_unique/);
   assert.match(migration, /CREATE TABLE "member_child_permissions"/);
   assert.match(migration, /CHECK \("can_operate" = 0 OR "can_view" = 1\)/);
+  assert.match(sharedMigration, /"child_account_mode" text/);
+  assert.match(sharedMigration, /"child_permissions_json" text/);
+  assert.match(sharedMigration, /"child_account_mode" = 'shared' AND "child_id" IS NULL/);
+  assert.match(sharedMigration, /"child_account_mode" = 'personal' AND "child_id" IS NOT NULL/);
 });
 
 test("invite acceptance derives role and child from the hashed server record", async () => {
@@ -24,10 +29,39 @@ test("invite acceptance derives role and child from the hashed server record", a
   assert.match(service, /expires_at > \?/);
   assert.match(service, /status = 'pending'/);
   assert.match(service, /accepted_by_user_id IS NULL/);
-  assert.match(service, /SELECT family_id, \?, role, child_id/);
+  assert.match(service, /SELECT family_id, \?, role, child_id, child_account_mode/);
   assert.match(service, /env\.DB\.batch\(statements\)/);
   const acceptBlock = service.slice(service.indexOf("export async function acceptFamilyInvitation"));
   assert.doesNotMatch(acceptBlock, /input\.(?:role|childId|familyId)/);
+});
+
+test("shared Child invitations and existing memberships use server-stored modes and permissions", async () => {
+  const [service, route, accountUi, joinUi] = await Promise.all([
+    read("app/account-service.ts"),
+    read("app/api/account/route.ts"),
+    read("app/account-management.tsx"),
+    read("app/join/[token]/invite-join-client.tsx"),
+  ]);
+  assert.match(service, /child_permissions_json/);
+  assert.match(service, /childAccountMode === "shared"/);
+  assert.match(service, /SET child_id = \?, child_account_mode = \?/);
+  assert.match(service, /家庭共用帳號請至少設定一位可查看的孩子/);
+  assert.match(route, /childAccountMode: body\.childAccountMode/);
+  assert.match(route, /boundChildId: body\.boundChildId/);
+  assert.match(accountUi, /家庭共用帳號/);
+  assert.match(accountUi, /兄弟姊妹共用/);
+  assert.match(joinUi, /可操作孩子/);
+});
+
+test("top navigation is a single-line touch scroller on narrow devices", async () => {
+  const [home, css] = await Promise.all([read("app/star-home.tsx"), read("app/globals.css")]);
+  assert.match(home, /className="main-navigation"/);
+  assert.match(home, /scrollIntoView\(\{block:"nearest",inline:"center"\}\)/);
+  assert.match(css, /\.topbar \.main-navigation\{[^}]*overflow-x:auto/);
+  assert.match(css, /white-space:nowrap/);
+  assert.match(css, /-webkit-overflow-scrolling:touch/);
+  assert.match(css, /\.topbar \.main-navigation button\{flex:0 0 auto/);
+  assert.match(css, /\.topbar \.main-navigation::-webkit-scrollbar\{display:none\}/);
 });
 
 test("Child data and actions are authorized on the server, not only hidden in React", async () => {

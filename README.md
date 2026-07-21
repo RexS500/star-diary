@@ -10,6 +10,8 @@
 pnpm install --frozen-lockfile
 pnpm run build
 pnpm run db:auth:migrate:local
+pnpm run db:account:migrate:local
+pnpm run db:shared-child:migrate:local
 pnpm run dev
 ```
 

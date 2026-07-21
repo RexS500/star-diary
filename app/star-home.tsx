@@ -164,10 +164,12 @@ type SignedInAccount = {
     image: string | null;
     role: "owner" | "parent" | "child";
     boundChildId: string | null;
+    childAccountMode: "personal" | "shared" | null;
 };
 type AccountAccessInfo = {
     role: SignedInAccount["role"];
     boundChildId: string | null;
+    childAccountMode: SignedInAccount["childAccountMode"];
     permissions: Array<{ childId: string; canView: boolean; canOperate: boolean }>;
 };
 const SESSION_EXPIRED_EVENT = "star-diary:session-expired";
@@ -681,10 +683,12 @@ export default function App({account}:{account:SignedInAccount}) {
     const [accountAccess,setAccountAccess]=useState<AccountAccessInfo>({
         role:account.role,
         boundChildId:account.boundChildId,
+        childAccountMode:account.childAccountMode,
         permissions:account.boundChildId?[{childId:account.boundChildId,canView:true,canOperate:true}]:[],
     });
     const setIntegerValidity=useCallback((key:string,invalid:boolean)=>{setInvalidIntegerFields(current=>{const next=new Set(current);if(invalid)next.add(key);else next.delete(key);return next.size===current.size&&[...next].every(item=>current.has(item))?current:next})},[]);
     const revisionRef=useRef(0),settingsDirtyRef=useRef(false),settingsBusyRef=useRef(false),savingSettingsRef=useRef(false),savedStateRef=useRef<State|null>(null),intentTriggerRef=useRef<HTMLElement|null>(null),toastTimerRef=useRef<ReturnType<typeof setTimeout>|null>(null);
+    const mainNavigationRef=useRef<HTMLElement|null>(null);
     const settingsPanelRef=useRef<HTMLDivElement|null>(null),settingsTabButtonRefs=useRef<Partial<Record<SettingsTabKey,HTMLButtonElement>>>({}),settingsTabScrollPositions=useRef<Partial<Record<SettingsTabKey,number>>>({});
     const child = data.children.find(c => c.id === cid) || data.children[0] || emptyChild;
     const canOperateSelectedChild=account.role!=="child"||Boolean(accountAccess.permissions.find(permission=>permission.childId===child.id)?.canOperate);
@@ -709,6 +713,15 @@ export default function App({account}:{account:SignedInAccount}) {
         const frame=window.requestAnimationFrame(()=>window.dispatchEvent(new Event("star-diary:ready")));
         return()=>window.cancelAnimationFrame(frame);
     },[loading]);
+    useEffect(()=>{
+        const navigation=mainNavigationRef.current,current=navigation?.querySelector<HTMLButtonElement>('button[aria-current="page"]');
+        if(!current)return;
+        const frame=window.requestAnimationFrame(()=>{
+            try{current.scrollIntoView({block:"nearest",inline:"center"})}
+            catch{current.scrollIntoView(false)}
+        });
+        return()=>window.cancelAnimationFrame(frame);
+    },[loading,role,tab]);
     useEffect(()=>{
         const syncFromLocation=()=>{
             if(tab!=="家庭設定")return;
@@ -806,7 +819,7 @@ export default function App({account}:{account:SignedInAccount}) {
         return <main className="loading" aria-label="正在載入家庭資料"><span className="visually-hidden">正在載入家庭資料</span></main>;
     if(loadFailed)return <FamilyLoadError account={account} onRetry={async()=>Boolean(await reloadState())}/>;
     if(!data.children.length)return account.role==="child"?<main className="family-onboarding-page"><section className="family-onboarding-card"><img src="/star-diary-logo.jpg" alt="" width={92} height={92}/><h1>目前沒有可查看的孩子</h1><p>請家庭 Owner 或 Parent 到「帳號管理」檢查你的 Child 綁定與查看權限，或在下方安全離開家庭。</p><button type="button" className="primary" onClick={()=>void signOut({callbackUrl:"/?switch=1"})}>切換 Google 帳號</button></section><section className="onboarding-account-management"><AccountManagement onMessage={say}/></section></main>:<EmptyFamilyOnboarding account={account} onCreate={createFirstChild} onMessage={say}/>;
-    return <main className={showSettingsSaveBar?"has-settings-save-bar":undefined}><header className="topbar"><button type="button" className="brand" aria-label="返回首頁｜星星日記" onClick={event => goTab("首頁",event.currentTarget)}><img className="brand-logo" src="/star-diary-logo.jpg" alt="" width={48} height={48}/><span className="brand-label">星星日記</span></button><nav aria-label="主要導覽">{["首頁", "任務挑戰", "星星紀錄", "資料分析", "星星寶庫", "兌換紀錄", ...(role === "家長" ? ["家庭設定", "帳號管理"] : account.role==="child" ? ["帳號管理"] : [])].map(x => <button key={x} className={tab === x ? "active" : ""} aria-current={tab===x?"page":undefined} onClick={event => goTab(x,event.currentTarget)}>{x}</button>)}</nav><div className="role-switch">{account.role!=="child"&&<button className={role === "家長" ? "on" : ""} onClick={enterParent}>家長</button>}<button className={role === "孩子" ? "on" : ""} onClick={event=>switchToChildMode(event.currentTarget)}>孩子</button></div><div className="signed-in-account">{account.image?<img src={account.image} alt="" referrerPolicy="no-referrer"/>:<span aria-hidden="true">G</span>}<div><strong>{account.name||"Google 使用者"}</strong><small>{account.email}</small></div><button type="button" onClick={()=>{setData(fallback);setCid("");setLoading(true);void signOut({callbackUrl:"/?switch=1"})}}>切換帳號</button></div></header><section className="shell"><div className="hello"><div><p className="eyebrow">FAMILY STAR JOURNAL</p><h1>{tab === "首頁" ? `嗨，${child.name}！今天也很棒 👋` : tab}</h1><p>{account.role==="child"?canOperateSelectedChild?"你可以查看並操作這位孩子的任務與兌換。":"你可以查看這位孩子，但操作需由家長授權。":"每位孩子都有自己的星星與完整紀錄。"}</p></div><label className="child-pill"><Avatar c={child}/><select value={cid} onChange={event => requestChildChange(event.target.value,event.currentTarget)}>{data.children.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label></div>
+    return <main className={showSettingsSaveBar?"has-settings-save-bar":undefined}><header className="topbar"><button type="button" className="brand" aria-label="返回首頁｜星星日記" onClick={event => goTab("首頁",event.currentTarget)}><img className="brand-logo" src="/star-diary-logo.jpg" alt="" width={48} height={48}/><span className="brand-label">星星日記</span></button><nav ref={mainNavigationRef} className="main-navigation" aria-label="主要導覽">{["首頁", "任務挑戰", "星星紀錄", "資料分析", "星星寶庫", "兌換紀錄", ...(role === "家長" ? ["家庭設定", "帳號管理"] : account.role==="child" ? ["帳號管理"] : [])].map(x => <button key={x} className={tab === x ? "active" : ""} aria-current={tab===x?"page":undefined} onClick={event => goTab(x,event.currentTarget)}>{x}</button>)}</nav><div className="role-switch">{account.role!=="child"&&<button className={role === "家長" ? "on" : ""} onClick={enterParent}>家長</button>}<button className={role === "孩子" ? "on" : ""} onClick={event=>switchToChildMode(event.currentTarget)}>孩子</button></div><div className="signed-in-account">{account.image?<img src={account.image} alt="" referrerPolicy="no-referrer"/>:<span aria-hidden="true">G</span>}<div><strong>{account.name||"Google 使用者"}</strong><small>{account.email}</small></div><button type="button" onClick={()=>{setData(fallback);setCid("");setLoading(true);void signOut({callbackUrl:"/?switch=1"})}}>切換帳號</button></div></header><section className="shell"><div className="hello"><div><p className="eyebrow">FAMILY STAR JOURNAL</p><h1>{tab === "首頁" ? `嗨，${child.name}！今天也很棒 👋` : tab}</h1><p>{account.role==="child"?canOperateSelectedChild?"你可以查看並操作這位孩子的任務與兌換。":"你可以查看這位孩子，但操作需由家長授權。":"每位孩子都有自己的星星與完整紀錄。"}</p></div><label className="child-pill"><Avatar c={child}/><select value={cid} onChange={event => requestChildChange(event.target.value,event.currentTarget)}>{data.children.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select></label></div>
     {tab === "首頁" && <><section className="hero-grid"><article className="balance-card"><p>我的星星</p><div className="big-star"><span>★</span><strong>{childBalance.total}</strong></div><small>每一次努力，都值得被看見</small></article>{account.role!=="child"&&<><QuickTemplateHomeCard/><article className="quick-card"><p>新增紀錄</p><strong>今天發生什麼事？</strong><div><button onClick={() => setRecord(true)}><span>＋★</span>加星／扣星／特殊</button></div></article></>}</section><Title text="最近紀錄"/><Entries /></>}
     {tab === "任務挑戰" && TaskChallenge()}
     {tab === "星星紀錄" && <><div className="record-tools"><span>{role==="家長"?"新增時可指定今天或過去的發生時間":"日期與時間會自動記錄"}</span>{role === "家長" && <button className="primary" onClick={() => setRecord(true)}>＋ 新增紀錄</button>}</div><Entries /></>}

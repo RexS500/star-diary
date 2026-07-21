@@ -31,5 +31,10 @@ export default async function Home({ searchParams }: HomeProps) {
     }
     throw error;
   }
-  return <StarHome account={{ ...account, role: familyAccess.role, boundChildId: familyAccess.boundChildId }}/>;
+  return <StarHome account={{
+    ...account,
+    role: familyAccess.role,
+    boundChildId: familyAccess.boundChildId,
+    childAccountMode: familyAccess.childAccountMode,
+  }}/>;
 }

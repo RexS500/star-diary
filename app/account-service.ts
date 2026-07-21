@@ -10,6 +10,7 @@ import {
   isFamilyManager,
   normalizeChildPermissions,
   sha256Hex,
+  type ChildAccountMode,
   type ChildPermission,
   type FamilyMemberRole,
   type InvitationRole,
@@ -27,6 +28,7 @@ type MemberRow = {
   user_id: string;
   role: FamilyMemberRole;
   child_id: string | null;
+  child_account_mode: ChildAccountMode | null;
   created_at: string;
   updated_at: string;
   status: "active" | "disabled";
@@ -47,6 +49,8 @@ type InvitationRow = {
   token_hash: string;
   role: InvitationRole;
   child_id: string | null;
+  child_account_mode: ChildAccountMode | null;
+  child_permissions_json: string | null;
   status: InvitationStatus;
   created_by_user_id: string;
   created_at: string;
@@ -72,6 +76,45 @@ export function accountApiErrorResponse(error: unknown) {
 
 function requireManager(family: FamilyAccess) {
   if (!isFamilyManager(family.role)) throw new AccountApiError("目前帳號沒有管理家庭成員的權限", 403);
+}
+
+function childAccountModeFor(value: unknown, childId: string | null): ChildAccountMode {
+  if (value === "personal" || value === "shared") return value;
+  return childId ? "personal" : "shared";
+}
+
+function submittedChildPermissions(value: unknown): ChildPermission[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(raw => {
+    if (!raw || typeof raw !== "object") return [];
+    const permission = raw as Record<string, unknown>;
+    if (typeof permission.childId !== "string" || !permission.childId) return [];
+    return [{
+      childId: permission.childId,
+      canView: permission.canView === true || permission.canOperate === true,
+      canOperate: permission.canOperate === true,
+    }];
+  });
+}
+
+function invitationPermissions(row: InvitationRow, children: ChildSummary[]) {
+  if (row.role !== "child") return [];
+  const mode = childAccountModeFor(row.child_account_mode, row.child_id);
+  let stored: ChildPermission[] = [];
+  if (row.child_permissions_json) {
+    try {
+      stored = submittedChildPermissions(JSON.parse(row.child_permissions_json) as unknown);
+    } catch {
+      stored = [];
+    }
+  }
+  const preset: PermissionPreset = stored.length ? "custom" : mode === "personal" ? "only_self" : "custom";
+  return normalizeChildPermissions({
+    childIds: children.map(child => child.id),
+    boundChildId: mode === "personal" ? row.child_id : null,
+    preset,
+    custom: stored,
+  });
 }
 
 async function inspectFamilyExit(family: FamilyAccess) {
@@ -136,12 +179,20 @@ async function invitationRowByHash(tokenHash: string) {
 
 function publicInvitation(row: InvitationRow, children: ChildSummary[], now = Date.now()) {
   const status = effectiveInvitationStatus(row.status, row.expires_at, now);
+  const childAccountMode = row.role === "child"
+    ? childAccountModeFor(row.child_account_mode, row.child_id)
+    : null;
+  const permissions = invitationPermissions(row, children);
   return {
     id: row.id,
     familyName: row.family_name,
     role: row.role,
     childId: row.child_id,
     childName: children.find(child => child.id === row.child_id)?.name || null,
+    childAccountMode,
+    permissions,
+    viewableChildNames: children.filter(child => permissions.some(permission => permission.childId === child.id && permission.canView)).map(child => child.name),
+    operableChildNames: children.filter(child => permissions.some(permission => permission.childId === child.id && permission.canOperate)).map(child => child.name),
     status,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
@@ -214,6 +265,9 @@ export async function getAccountManagementSnapshot(family: FamilyAccess, now = D
     image: member.image,
     role: member.role,
     childId: member.child_id,
+    childAccountMode: member.role === "child"
+      ? childAccountModeFor(member.child_account_mode, member.child_id)
+      : null,
     childName: children.find(child => child.id === member.child_id)?.name || null,
     joinedAt: member.created_at,
     status: member.status,
@@ -237,7 +291,13 @@ export async function getAccountManagementSnapshot(family: FamilyAccess, now = D
 
 export async function createFamilyInvitation(
   family: FamilyAccess,
-  input: { role?: unknown; childId?: unknown },
+  input: {
+    role?: unknown;
+    childId?: unknown;
+    childAccountMode?: unknown;
+    preset?: unknown;
+    permissions?: unknown;
+  },
   origin: string,
   now = Date.now(),
 ) {
@@ -245,8 +305,37 @@ export async function createFamilyInvitation(
   const role = input.role === "parent" || input.role === "child" ? input.role : null;
   if (!role) throw new AccountApiError("請選擇 Parent 或 Child", 422);
   const children = await getFamilyChildren(family.familyId);
-  const childId = role === "child" && typeof input.childId === "string" ? input.childId : null;
-  if (role === "child" && !children.some(child => child.id === childId)) throw new AccountApiError("請選擇要綁定的孩子", 422);
+  const submittedChildId = typeof input.childId === "string" && input.childId ? input.childId : null;
+  const childAccountMode = role === "child"
+    ? input.childAccountMode === "personal" || input.childAccountMode === "shared"
+      ? input.childAccountMode
+      : submittedChildId ? "personal" : null
+    : null;
+  if (role === "child" && !childAccountMode) throw new AccountApiError("請選擇 Child 帳號使用方式", 422);
+  const childId = role === "child" && childAccountMode === "personal" && typeof input.childId === "string"
+    ? input.childId
+    : null;
+  if (role === "child" && childAccountMode === "personal" && !children.some(child => child.id === childId)) {
+    throw new AccountApiError("請選擇要綁定的孩子", 422);
+  }
+  if (role === "child" && childAccountMode === "shared" && submittedChildId) {
+    throw new AccountApiError("家庭共用帳號不可綁定特定孩子", 422);
+  }
+  const requestedPreset = input.preset === "only_self" || input.preset === "share_all" || input.preset === "view_all" || input.preset === "custom"
+    ? input.preset as PermissionPreset
+    : childAccountMode === "shared" ? "share_all" : "only_self";
+  if (childAccountMode === "shared" && requestedPreset === "only_self") {
+    throw new AccountApiError("家庭共用帳號請選擇共用或自訂權限", 422);
+  }
+  const permissions = role === "child" ? normalizeChildPermissions({
+    childIds: children.map(child => child.id),
+    boundChildId: childAccountMode === "personal" ? childId : null,
+    preset: requestedPreset,
+    custom: submittedChildPermissions(input.permissions),
+  }) : [];
+  if (childAccountMode === "shared" && !permissions.some(permission => permission.canView)) {
+    throw new AccountApiError("家庭共用帳號請至少設定一位可查看的孩子", 422);
+  }
 
   if (childId) {
     await env.DB.prepare(
@@ -277,9 +366,21 @@ export async function createFamilyInvitation(
   try {
     await env.DB.prepare(
       `INSERT INTO family_invitations
-         (id, family_id, token_hash, role, child_id, status, created_by_user_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-    ).bind(id, family.familyId, tokenHash, role, childId, family.user.id, createdAt, expiresAt).run();
+         (id, family_id, token_hash, role, child_id, child_account_mode, child_permissions_json,
+          status, created_by_user_id, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+    ).bind(
+      id,
+      family.familyId,
+      tokenHash,
+      role,
+      childId,
+      childAccountMode,
+      role === "child" ? JSON.stringify(permissions) : null,
+      family.user.id,
+      createdAt,
+      expiresAt,
+    ).run();
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (/family_invitations_pending_child_unique|UNIQUE constraint failed: family_invitations\.family_id, family_invitations\.child_id/i.test(message)) {
@@ -293,6 +394,10 @@ export async function createFamilyInvitation(
     role,
     childId,
     childName: children.find(child => child.id === childId)?.name || null,
+    childAccountMode,
+    permissions,
+    viewableChildNames: children.filter(child => permissions.some(permission => permission.childId === child.id && permission.canView)).map(child => child.name),
+    operableChildNames: children.filter(child => permissions.some(permission => permission.childId === child.id && permission.canOperate)).map(child => child.name),
     status: "pending" as const,
     createdAt,
     expiresAt,
@@ -321,7 +426,13 @@ export async function cancelFamilyInvitation(family: FamilyAccess, invitationId:
 
 export async function updateMemberChildPermissions(
   family: FamilyAccess,
-  input: { userId?: unknown; preset?: unknown; permissions?: unknown },
+  input: {
+    userId?: unknown;
+    childAccountMode?: unknown;
+    boundChildId?: unknown;
+    preset?: unknown;
+    permissions?: unknown;
+  },
   now = Date.now(),
 ) {
   requireManager(family);
@@ -331,19 +442,47 @@ export async function updateMemberChildPermissions(
     : null;
   if (!userId || !preset) throw new AccountApiError("權限設定不完整", 422);
   const member = await env.DB.prepare(
-    `SELECT child_id FROM family_members
+    `SELECT child_id, child_account_mode FROM family_members
       WHERE family_id = ? AND user_id = ? AND role = 'child' AND status = 'active'`,
-  ).bind(family.familyId, userId).first<{ child_id: string | null }>();
-  if (!member?.child_id) throw new AccountApiError("找不到可設定的 Child 成員", 404);
+  ).bind(family.familyId, userId).first<{ child_id: string | null; child_account_mode: ChildAccountMode | null }>();
+  if (!member) throw new AccountApiError("找不到可設定的 Child 成員", 404);
   const children = await getFamilyChildren(family.familyId);
-  const custom = Array.isArray(input.permissions) ? input.permissions.flatMap(raw => {
-    if (!raw || typeof raw !== "object") return [];
-    const value = raw as Record<string, unknown>;
-    return typeof value.childId === "string" ? [{ childId: value.childId, canView: value.canView === true, canOperate: value.canOperate === true }] : [];
-  }) : [];
-  const normalized = normalizeChildPermissions({ childIds: children.map(child => child.id), boundChildId: member.child_id, preset, custom });
+  const childAccountMode = input.childAccountMode === "personal" || input.childAccountMode === "shared"
+    ? input.childAccountMode
+    : childAccountModeFor(member.child_account_mode, member.child_id);
+  const boundChildId = childAccountMode === "personal"
+    ? typeof input.boundChildId === "string" && input.boundChildId ? input.boundChildId : member.child_id
+    : null;
+  if (childAccountMode === "personal" && !children.some(child => child.id === boundChildId)) {
+    throw new AccountApiError("個人孩子帳號必須選擇要綁定的孩子", 422);
+  }
+  if (childAccountMode === "shared" && preset === "only_self") {
+    throw new AccountApiError("家庭共用帳號請選擇共用或自訂權限", 422);
+  }
+  if (boundChildId) {
+    const duplicate = await env.DB.prepare(
+      `SELECT 1 AS found FROM family_members
+        WHERE family_id = ? AND user_id <> ? AND role = 'child'
+          AND child_id = ? AND status = 'active' LIMIT 1`,
+    ).bind(family.familyId, userId, boundChildId).first<{ found: number }>();
+    if (duplicate) throw new AccountApiError("這位孩子已綁定其他有效 Child 帳號", 409);
+  }
+  const normalized = normalizeChildPermissions({
+    childIds: children.map(child => child.id),
+    boundChildId,
+    preset,
+    custom: submittedChildPermissions(input.permissions),
+  });
+  if (childAccountMode === "shared" && !normalized.some(permission => permission.canView)) {
+    throw new AccountApiError("家庭共用帳號請至少設定一位可查看的孩子", 422);
+  }
   const timestamp = new Date(now).toISOString();
   const statements = [
+    env.DB.prepare(
+      `UPDATE family_members
+          SET child_id = ?, child_account_mode = ?, updated_at = ?
+        WHERE family_id = ? AND user_id = ? AND role = 'child' AND status = 'active'`,
+    ).bind(boundChildId, childAccountMode, timestamp, family.familyId, userId),
     env.DB.prepare("DELETE FROM member_child_permissions WHERE family_id = ? AND user_id = ?").bind(family.familyId, userId),
     ...normalized.map(permission => env.DB.prepare(
       `INSERT INTO member_child_permissions
@@ -351,8 +490,18 @@ export async function updateMemberChildPermissions(
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(family.familyId, userId, permission.childId, permission.canView ? 1 : 0, permission.canOperate ? 1 : 0, timestamp, timestamp)),
   ];
-  await env.DB.batch(statements);
-  return normalized;
+  try {
+    const results = await env.DB.batch(statements);
+    if (Number(results[0].meta.changes || 0) !== 1) throw new AccountApiError("Child 成員資料已變更，請重新整理", 409);
+  } catch (error) {
+    if (error instanceof AccountApiError) throw error;
+    const message = error instanceof Error ? error.message : "";
+    if (/family_members_child_binding_unique|UNIQUE constraint failed: family_members\.family_id, family_members\.child_id/i.test(message)) {
+      throw new AccountApiError("這位孩子已綁定其他有效 Child 帳號", 409);
+    }
+    throw error;
+  }
+  return { childAccountMode, childId: boundChildId, permissions: normalized };
 }
 
 export async function removeFamilyMember(family: FamilyAccess, userId: string) {
@@ -442,13 +591,22 @@ export async function acceptFamilyInvitation(
   if (existing) throw new AccountApiError("此 Google 帳號已加入其他家庭，目前無法接受新的家庭邀請。", 409);
 
   const children = await getFamilyChildren(row.family_id);
+  const childAccountMode = row.role === "child"
+    ? childAccountModeFor(row.child_account_mode, row.child_id)
+    : null;
+  const permissions = invitationPermissions(row, children);
   if (row.role === "child") {
-    if (!row.child_id || !children.some(child => child.id === row.child_id)) throw new AccountApiError("邀請綁定的孩子已不存在", 409);
-    const bound = await env.DB.prepare(
-      `SELECT 1 AS found FROM family_members
-        WHERE family_id = ? AND role = 'child' AND child_id = ? AND status = 'active' LIMIT 1`,
-    ).bind(row.family_id, row.child_id).first<{ found: number }>();
-    if (bound) throw new AccountApiError("這位孩子已綁定其他有效 Child 帳號", 409);
+    if (childAccountMode === "personal") {
+      if (!row.child_id || !children.some(child => child.id === row.child_id)) throw new AccountApiError("邀請綁定的孩子已不存在", 409);
+      const bound = await env.DB.prepare(
+        `SELECT 1 AS found FROM family_members
+          WHERE family_id = ? AND role = 'child' AND child_id = ? AND status = 'active' LIMIT 1`,
+      ).bind(row.family_id, row.child_id).first<{ found: number }>();
+      if (bound) throw new AccountApiError("這位孩子已綁定其他有效 Child 帳號", 409);
+    } else {
+      if (row.child_id) throw new AccountApiError("家庭共用邀請資料不正確", 409);
+      if (!permissions.some(permission => permission.canView)) throw new AccountApiError("家庭共用邀請沒有可查看的孩子，請家長重新建立", 409);
+    }
   }
 
   const timestamp = new Date(now).toISOString();
@@ -461,15 +619,14 @@ export async function acceptFamilyInvitation(
     ).bind(timestamp, user.id, row.id, tokenHash, timestamp),
     env.DB.prepare(
       `INSERT INTO family_members
-         (family_id, user_id, role, child_id, created_at, updated_at, status)
-       SELECT family_id, ?, role, child_id, ?, ?, 'active'
+         (family_id, user_id, role, child_id, child_account_mode, created_at, updated_at, status)
+       SELECT family_id, ?, role, child_id, child_account_mode, ?, ?, 'active'
          FROM family_invitations
         WHERE id = ? AND status = 'accepted' AND accepted_by_user_id = ?`,
     ).bind(user.id, timestamp, timestamp, row.id, user.id),
   ];
-  if (row.role === "child" && row.child_id) {
-    const defaults = normalizeChildPermissions({ childIds: children.map(child => child.id), boundChildId: row.child_id, preset: "only_self" });
-    for (const permission of defaults) {
+  if (row.role === "child") {
+    for (const permission of permissions) {
       statements.push(env.DB.prepare(
         `INSERT INTO member_child_permissions
            (family_id, user_id, child_id, can_view, can_operate, created_at, updated_at)
@@ -495,7 +652,13 @@ export async function acceptFamilyInvitation(
     }
     throw error;
   }
-  return { familyId: row.family_id, familyName: row.family_name, role: row.role };
+  return {
+    familyId: row.family_id,
+    familyName: row.family_name,
+    role: row.role,
+    childAccountMode,
+    boundChildId: row.child_id,
+  };
 }
 
 export type { ChildPermission };

@@ -3,6 +3,7 @@ import type { Session } from "next-auth";
 import { auth } from "../auth";
 
 export type FamilyRole = "owner" | "parent" | "child";
+export type ChildAccountMode = "personal" | "shared";
 export type MemberChildPermission = {
   childId: string;
   canView: boolean;
@@ -13,6 +14,7 @@ export type FamilyAccess = {
   familyName: string;
   role: FamilyRole;
   boundChildId: string | null;
+  childAccountMode: ChildAccountMode | null;
   user: {
     id: string;
     email: string;
@@ -26,6 +28,7 @@ type MembershipRow = {
   family_name: string;
   role: FamilyRole;
   child_id: string | null;
+  child_account_mode: ChildAccountMode | null;
 };
 
 type FamilyRow = {
@@ -65,7 +68,7 @@ function sessionUser(session: Session | null): FamilyAccess["user"] {
 
 async function membershipForUser(userId: string) {
   return env.DB.prepare(
-    `SELECT fm.family_id, f.name AS family_name, fm.role, fm.child_id
+    `SELECT fm.family_id, f.name AS family_name, fm.role, fm.child_id, fm.child_account_mode
       FROM family_members fm
        JOIN families f ON f.id = fm.family_id
       WHERE fm.user_id = ? AND fm.status = 'active'
@@ -133,6 +136,9 @@ export async function getFamilyForAuthenticatedUser(
     familyName: membership.family_name,
     role: membership.role,
     boundChildId: membership.child_id,
+    childAccountMode: membership.role === "child"
+      ? membership.child_account_mode || (membership.child_id ? "personal" : "shared")
+      : null,
     user,
   };
 }
