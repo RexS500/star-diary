@@ -59,3 +59,27 @@ test("Google login and account switching force the real account chooser", async 
   assert.match(home, /signOut\(\{callbackUrl:"\/\?switch=1"\}\)/);
   assert.match(home, />切換帳號<\/button>/);
 });
+
+test("leaving and deleting an empty family are server-guarded self-service actions", async () => {
+  const [service, route, accountUi, home] = await Promise.all([
+    read("app/account-service.ts"),
+    read("app/api/account/route.ts"),
+    read("app/account-management.tsx"),
+    read("app/star-home.tsx"),
+  ]);
+  assert.match(route, /body\.action === "leave_family"/);
+  assert.match(route, /body\.action === "delete_empty_family"/);
+  assert.match(service, /export async function leaveCurrentFamily/);
+  assert.match(service, /role IN \('parent', 'child'\)/);
+  assert.match(service, /export async function deleteEmptyFamily/);
+  assert.match(service, /id <> 'legacy-family-v1'/);
+  assert.match(service, /NOT EXISTS \(SELECT 1 FROM media_objects/);
+  assert.match(service, /NOT EXISTS \(SELECT 1 FROM family_invitations/);
+  assert.match(service, /updated_at = \?/);
+  assert.match(service, /DELETE FROM sessions/);
+  assert.match(accountUi, /action: "leave_family"/);
+  assert.match(accountUi, /action: "delete_empty_family"/);
+  assert.match(accountUi, /最後確認/);
+  assert.match(accountUi, /signOut\(\{ callbackUrl: "\/\?switch=1" \}\)/);
+  assert.match(home, /account\.role==="child" \? \["帳號管理"\]/);
+});

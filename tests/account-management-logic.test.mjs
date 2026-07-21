@@ -6,6 +6,7 @@ import {
   createInvitationCredential,
   effectiveInvitationStatus,
   invitationTokenLooksValid,
+  isEmptyFamilyState,
   normalizeChildPermissions,
   permissionPresetFor,
   sha256Hex,
@@ -62,4 +63,20 @@ test("Owner and Parent removal rules protect the Owner role", () => {
   assert.equal(canRemoveFamilyMember("parent", "owner"), false);
   assert.equal(canRemoveFamilyMember("parent", "parent"), false);
   assert.equal(canRemoveFamilyMember("owner", "owner"), false);
+});
+
+test("empty-family deletion rejects every meaningful family state value", () => {
+  const blank = {
+    children: [], entries: [], rewards: [], templates: [], redemptions: [],
+    specialRewards: [], rewardIconLibrary: [], dailyTasks: [], dailyTaskRecords: [],
+    dailyTaskSettings: {}, favoriteOfficialTaskIds: [], dailyTaskSortMode: "flow",
+    passwordHash: "", securityAnswerHash: "", securityFailedAttempts: 0,
+  };
+  assert.equal(isEmptyFamilyState(JSON.stringify(blank)), true);
+  assert.equal(isEmptyFamilyState(null), true);
+  assert.equal(isEmptyFamilyState("not-json"), false);
+  assert.equal(isEmptyFamilyState(JSON.stringify({ ...blank, children: [{ id: "child" }] })), false);
+  assert.equal(isEmptyFamilyState(JSON.stringify({ ...blank, entries: [{ id: "entry" }] })), false);
+  assert.equal(isEmptyFamilyState(JSON.stringify({ ...blank, passwordHash: "configured" })), false);
+  assert.equal(isEmptyFamilyState(JSON.stringify({ ...blank, futureFeatureData: { enabled: true } })), false);
 });

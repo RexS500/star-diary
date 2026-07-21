@@ -1,9 +1,11 @@
 "use client";
 
+import { signOut } from "next-auth/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   canRemoveFamilyMember,
   effectiveInvitationStatus,
+  isFamilyManager,
   normalizeChildPermissions,
   permissionPresetFor,
   type ChildPermission,
@@ -41,11 +43,18 @@ type InvitationView = {
 };
 type AccountSnapshot = {
   family: { id: string; name: string };
-  currentUser: { id: string; role: "owner" | "parent" };
+  currentUser: { id: string; role: FamilyMemberRole };
   children: ChildSummary[];
   members: MemberView[];
   activeInvitations: InvitationView[];
   invitationHistory: InvitationView[];
+  familyExit: {
+    memberCount: number;
+    isEmpty: boolean;
+    canLeave: boolean;
+    canDeleteEmptyFamily: boolean;
+    blockedReason: string | null;
+  };
 };
 
 const roleLabel: Record<FamilyMemberRole, string> = { owner: "Owner", parent: "Parent", child: "Child" };
@@ -131,7 +140,7 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const result = await response.json() as { error?: string; invitation?: InvitationView; permissions?: ChildPermission[] };
+    const result = await response.json() as { error?: string; invitation?: InvitationView; permissions?: ChildPermission[]; signedOut?: boolean };
     if (!response.ok) throw new Error(result.error || "操作失敗");
     return result;
   }
@@ -243,13 +252,46 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
     }
   }
 
+  async function leaveFamily() {
+    if (!snapshot || !confirm(`確定離開「${snapshot.family.name}」？離開後會立即登出，必須重新接受邀請才能回來。`)) return;
+    setBusy("leave-family");
+    setError("");
+    try {
+      await post({ action: "leave_family" });
+      await signOut({ callbackUrl: "/?switch=1" });
+    } catch (value) {
+      const message = value instanceof Error ? value.message : "離開家庭失敗";
+      setError(message);
+      onMessage(message);
+      setBusy("");
+    }
+  }
+
+  async function deleteBlankFamily() {
+    if (!snapshot || !confirm(`確定刪除空白家庭「${snapshot.family.name}」？`)) return;
+    if (!confirm("最後確認：家庭與空白設定將永久刪除，但 Google 帳號會保留。確定繼續？")) return;
+    setBusy("delete-empty-family");
+    setError("");
+    try {
+      await post({ action: "delete_empty_family" });
+      await signOut({ callbackUrl: "/?switch=1" });
+    } catch (value) {
+      const message = value instanceof Error ? value.message : "刪除空白家庭失敗";
+      setError(message);
+      onMessage(message);
+      setBusy("");
+    }
+  }
+
   if (loading) return <section className="account-management-loading" aria-label="正在載入帳號管理">正在載入帳號管理…</section>;
   if (!snapshot) return <section className="account-management-error" role="alert"><h2>帳號管理暫時無法開啟</h2><p>{error}</p><button onClick={() => void load()}>重新整理</button></section>;
 
+  const canManageFamily = isFamilyManager(snapshot.currentUser.role);
   return <div className="account-management-page">
-    <div className="account-management-heading"><div><p className="eyebrow">FAMILY ACCESS</p><h2>👥 帳號管理</h2><p>管理 Google 家庭成員、一次性邀請與 Child 可查看／可操作的孩子。</p></div><button className="primary" onClick={() => setInviteModal(true)}>＋ 邀請成員</button></div>
+    <div className="account-management-heading"><div><p className="eyebrow">FAMILY ACCESS</p><h2>👥 帳號管理</h2><p>{canManageFamily ? "管理 Google 家庭成員、一次性邀請與 Child 可查看／可操作的孩子。" : "查看目前家庭，或安全離開家庭。"}</p></div>{canManageFamily && <button className="primary" onClick={() => setInviteModal(true)}>＋ 邀請成員</button>}</div>
     {error && <p className="account-management-alert" role="alert">{error}</p>}
 
+    {canManageFamily && <>
     <section className="account-section"><div className="account-section-title"><div><h3>家庭成員</h3><p>{snapshot.family.name}・共 {snapshot.members.length} 位</p></div></div><div className="family-member-list">{snapshot.members.map(member => <article className="family-member-card" key={member.userId}>
       <div className="member-identity">{member.image ? <img src={member.image} alt="" referrerPolicy="no-referrer"/> : <span aria-hidden="true">G</span>}<div><strong>{member.name}</strong><small>{member.email}</small></div></div>
       <div className="member-meta"><span className={`member-role role-${member.role}`}>{roleLabel[member.role]}</span><span>{member.status === "active" ? "啟用中" : "已停用"}</span>{member.role === "child" && <span>綁定孩子：{member.childName || "未綁定"}</span>}<small>加入時間：{formatDate(member.joinedAt)}</small></div>
@@ -264,6 +306,13 @@ export function AccountManagement({ onMessage }: { onMessage: (message: string) 
     </article>)}</div> : <p className="account-empty">目前沒有有效邀請。</p>}</section>
 
     <section className="account-section"><div className="account-section-title"><div><h3>已失效／已使用邀請</h3><p>舊 token 不會延長或重複使用。</p></div></div>{invitationHistory.length ? <div className="invitation-history">{invitationHistory.map(invitation => <article key={invitation.id}><div><strong>{invitation.role === "parent" ? "Parent" : `Child・${invitation.childName || "指定孩子"}`}</strong><small>{formatDate(invitation.createdAt)}</small></div><span className={`invite-status status-${invitation.status}`}>{statusLabel[invitation.status]}</span></article>)}</div> : <p className="account-empty">目前沒有歷史邀請。</p>}</section>
+    </>}
+
+    <section className="account-section family-exit-section"><div className="account-section-title"><div><h3>離開家庭／刪除空白家庭</h3><p>目前角色：{roleLabel[snapshot.currentUser.role]}・{snapshot.family.name}</p></div></div><div className="family-exit-content">
+      {snapshot.familyExit.canLeave && <><p>離開後只會解除你的家庭關係並登出；Google user 與 Auth.js 帳號資料會保留。</p><button type="button" className="family-leave-button" disabled={Boolean(busy)} onClick={() => void leaveFamily()}>{busy === "leave-family" ? "離開中…" : "離開家庭"}</button></>}
+      {snapshot.familyExit.canDeleteEmptyFamily && <><p>這個家庭只有你一位 Owner，且沒有孩子、星星、任務、獎勵、紀錄、圖片或邀請資料。</p><button type="button" className="family-delete-button" disabled={Boolean(busy)} onClick={() => void deleteBlankFamily()}>{busy === "delete-empty-family" ? "刪除中…" : "刪除空白家庭"}</button></>}
+      {!snapshot.familyExit.canLeave && !snapshot.familyExit.canDeleteEmptyFamily && <p className="family-exit-blocked">🔒 {snapshot.familyExit.blockedReason || "目前無法離開或刪除這個家庭。"}</p>}
+    </div></section>
 
     {inviteModal && <div className="modal-back"><section className="modal account-invite-modal" role="dialog" aria-modal="true" aria-labelledby="invite-member-title"><button className="close" aria-label="關閉邀請成員" onClick={() => setInviteModal(false)}>×</button><h2 id="invite-member-title">邀請成員</h2><fieldset><legend>請選擇角色</legend><div className="invite-role-options"><button aria-pressed={inviteRole === "parent"} onClick={() => setInviteRole("parent")}><strong>Parent</strong><span>可管理孩子、任務、星星與 Child 權限</span></button><button aria-pressed={inviteRole === "child"} onClick={() => setInviteRole("child")}><strong>Child</strong><span>依權限查看與操作孩子端功能</span></button></div></fieldset>{inviteRole === "child" && <label>綁定既有孩子<select value={inviteChildId} onChange={event => setInviteChildId(event.target.value)}>{snapshot.children.map(child => <option value={child.id} key={child.id}>{child.name}</option>)}</select></label>}<p className="invite-expiry-note">🔒 連結使用 32 bytes 隨機 token，10 分鐘後自動失效。</p><button className="save" disabled={busy === "create"} onClick={() => void createInvitation()}>{busy === "create" ? "建立中…" : "建立一次性邀請"}</button></section></div>}
 

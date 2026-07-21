@@ -3,7 +3,9 @@ import {
   accountApiErrorResponse,
   cancelFamilyInvitation,
   createFamilyInvitation,
+  deleteEmptyFamily,
   getAccountManagementSnapshot,
+  leaveCurrentFamily,
   removeFamilyMember,
   updateMemberChildPermissions,
 } from "../../account-service";
@@ -56,6 +58,14 @@ export async function POST(req: Request) {
       if (typeof body.userId !== "string") throw new AccountApiError("家庭成員資料不完整", 422);
       await removeFamilyMember(family, body.userId);
       return Response.json({ ok: true }, { headers: privateHeaders });
+    }
+    if (body.action === "leave_family") {
+      await leaveCurrentFamily(family);
+      return Response.json({ ok: true, signedOut: true }, { headers: privateHeaders });
+    }
+    if (body.action === "delete_empty_family") {
+      await deleteEmptyFamily(family);
+      return Response.json({ ok: true, signedOut: true }, { headers: privateHeaders });
     }
     throw new AccountApiError("不支援的帳號管理操作", 422);
   } catch (error) {

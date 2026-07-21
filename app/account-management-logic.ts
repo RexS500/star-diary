@@ -5,6 +5,38 @@ export type InvitationRole = "parent" | "child";
 export type InvitationStatus = "pending" | "accepted" | "expired" | "cancelled";
 export type PermissionPreset = "only_self" | "share_all" | "view_all" | "custom";
 
+const EMPTY_ARRAY_STATE_KEYS = [
+  "children",
+  "entries",
+  "rewards",
+  "templates",
+  "redemptions",
+  "specialRewards",
+  "rewardIconLibrary",
+  "dailyTasks",
+  "dailyTaskRecords",
+  "favoriteOfficialTaskIds",
+] as const;
+const EMPTY_OBJECT_STATE_KEYS = ["dailyTaskSettings"] as const;
+const EMPTY_TEXT_STATE_KEYS = [
+  "passwordHash",
+  "securityAnswerHash",
+  "securityAnswerHint",
+  "securityLockedUntil",
+  "securityQuestionText",
+  "securityQuestionType",
+  "securityResetTokenExpiresAt",
+  "securityResetTokenHash",
+] as const;
+const EMPTY_NUMBER_STATE_KEYS = ["securityFailedAttempts"] as const;
+const KNOWN_EMPTY_STATE_KEYS = new Set<string>([
+  ...EMPTY_ARRAY_STATE_KEYS,
+  ...EMPTY_OBJECT_STATE_KEYS,
+  ...EMPTY_TEXT_STATE_KEYS,
+  ...EMPTY_NUMBER_STATE_KEYS,
+  "dailyTaskSortMode",
+]);
+
 export type ChildPermission = {
   childId: string;
   canView: boolean;
@@ -28,6 +60,46 @@ export function canRemoveFamilyMember(actor: FamilyMemberRole, target: FamilyMem
   if (target === "owner") return false;
   if (actor === "owner") return target === "parent" || target === "child";
   return actor === "parent" && target === "child";
+}
+
+function hasMeaningfulStateValue(value: unknown): boolean {
+  if (value == null || value === false || value === 0 || value === "") return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+  return true;
+}
+
+export function isEmptyFamilyState(raw: string | null | undefined) {
+  if (!raw) return true;
+  let state: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    state = parsed as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+
+  for (const key of EMPTY_ARRAY_STATE_KEYS) {
+    const value = state[key];
+    if (value !== undefined && (!Array.isArray(value) || value.length > 0)) return false;
+  }
+  for (const key of EMPTY_OBJECT_STATE_KEYS) {
+    const value = state[key];
+    if (value !== undefined && (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value as object).length > 0)) return false;
+  }
+  for (const key of EMPTY_TEXT_STATE_KEYS) {
+    const value = state[key];
+    if (value != null && (typeof value !== "string" || value.trim().length > 0)) return false;
+  }
+  for (const key of EMPTY_NUMBER_STATE_KEYS) {
+    const value = state[key];
+    if (value != null && (typeof value !== "number" || value !== 0)) return false;
+  }
+  if (state.dailyTaskSortMode !== undefined && state.dailyTaskSortMode !== "flow") return false;
+
+  return !Object.entries(state).some(([key, value]) => !KNOWN_EMPTY_STATE_KEYS.has(key) && hasMeaningfulStateValue(value));
 }
 
 export function normalizeChildPermissions(options: {

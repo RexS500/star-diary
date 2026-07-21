@@ -6,7 +6,7 @@
 
 - `owner`：完整家庭與帳號管理權；可移除 Parent／Child，但 Owner 不可被移除。
 - `parent`：完整家庭功能；可邀請 Parent／Child、設定 Child 權限、移除 Child，不能移除 Owner 或 Parent。
-- `child`：只能收到獲准 `can_view` 的孩子資料；只有 `can_operate` 的孩子可提交每日任務與兌換。不能加／扣星、進入家長模式、儲存家庭設定或管理帳號。
+- `child`：只能收到獲准 `can_view` 的孩子資料；只有 `can_operate` 的孩子可提交每日任務與兌換。不能加／扣星、進入家長模式、儲存家庭設定或管理其他帳號，但可在「帳號管理」解除自己的家庭關係。
 
 所有寫入都由 Worker 依 Auth.js Session 取得 `user_id` 與 `family_id`。前端沒有可指定 `family_id`、角色或邀請綁定孩子的欄位。涉及孩子的 Child 操作會再次查詢 `member_child_permissions`。
 
@@ -35,18 +35,29 @@
 
 ## API 路由
 
-- `GET /api/account`：Owner／Parent 取得家庭成員、Child 權限、有效與歷史邀請。
+- `GET /api/account`：Owner／Parent 取得家庭成員、Child 權限、有效與歷史邀請；Child 只取得自己的家庭離開狀態，不會看到其他成員或邀請。
 - `POST /api/account`
   - `create_invitation`
   - `cancel_invitation`
   - `update_child_permissions`
   - `remove_member`
+  - `leave_family`：Parent／Child 只可解除自己的 membership，並立即使自己的 session 失效。
+  - `delete_empty_family`：只允許唯一 Owner 刪除非 legacy 的空白家庭。
 - `GET /api/invitations/{token}`：公開查詢仍有效的邀請摘要，不回傳 family id 或 token hash。
 - `POST /api/invitations/{token}`：已登入 Google 使用者接受邀請。
 - `GET /api/state`：Owner／Parent 取得全家庭；Child 只取得可查看孩子及相關紀錄。
 - `POST /api/state`：Child 只可對獲准操作的孩子送出每日任務完成與兌換；其他動作回 403。
 
 錯誤皆使用 `{ "error": "繁體中文訊息" }`，並依情況回傳 401、403、404、409、410、422。
+
+## 離開家庭與刪除空白家庭
+
+- Parent、Child 可以離開目前家庭；後端只刪除目前登入 user 的 membership，不刪除 `users` 或 `accounts`。
+- Owner 不能直接離開有正式資料的家庭，也不能讓有其他成員的家庭成為無主家庭；必須先轉移 Owner。
+- 只有非 legacy、成員僅剩目前 Owner，而且 state、孩子、星星、任務、獎勵、紀錄、兌換、圖片、邀請與權限均為空的家庭，才會顯示「刪除空白家庭」。
+- 刪除 UI 需要兩次確認。Worker 會在執行前重新解析完整 `family_state`；未知的未來資料欄位只要不是空值也會阻擋刪除。
+- 真正 DELETE 同時檢查 member count、legacy 標記、R2 metadata、邀請、權限與 `family_state.updated_at`。若檢查後資料被其他請求更新，刪除會回 409，不會套用舊判斷。
+- `legacy-family-v1` 永遠不會被「刪除空白家庭」動作刪除。
 
 ## 本機驗證
 
@@ -91,10 +102,12 @@ pnpm exec wrangler deploy --config dist/server/wrangler.json
 1. Owner 開啟「帳號管理」，建立 Parent 邀請並確認 10 分鐘倒數、複製與分享。
 2. 無痕視窗開啟邀請，選另一個 Google 帳號，確認加入為 Parent。
 3. 建立 Child 邀請並指定既有孩子，確認不能替已綁定孩子重複建邀請。
-4. Child 登入後只看得到預設綁定孩子，能完成任務與送出兌換，但看不到家長模式、快速加扣星與帳號管理。
+4. Child 登入後只看得到預設綁定孩子，能完成任務與送出兌換，但看不到家長模式與快速加扣星；帳號管理只顯示自己的離開家庭操作。
 5. 依序切換「兄弟姊妹共用」「可查看全部」「自訂」，確認切換孩子、查看與操作權限同步生效。
 6. 取消邀請、等待測試邀請到期、重開已使用連結，確認 API 均拒絕。
 7. 點「切換帳號」，確認 Auth.js 登出後 Google 顯示帳號選擇器；「切換查看孩子」不會登出。
+8. Parent／Child 點「離開家庭」，確認只解除自己並登出；Owner 有成員或資料時按鈕必須被後端阻擋。
+9. 使用全新空白 Owner 家庭確認「刪除空白家庭」需二次確認；新增任一孩子、紀錄、任務、獎勵、圖片或邀請後都不可刪除。
 
 ## 回復策略
 

@@ -6,6 +6,7 @@ import {
   createInvitationCredential,
   effectiveInvitationStatus,
   invitationTokenLooksValid,
+  isEmptyFamilyState,
   isFamilyManager,
   normalizeChildPermissions,
   sha256Hex,
@@ -18,6 +19,9 @@ import {
 
 type ChildSummary = { id: string; name: string };
 type FamilyStateRow = { data: string };
+type FamilyExitStateRow = { data: string; updated_at: number };
+type FamilyExitFamilyRow = { legacy_state: number };
+type CountRow = { count: number };
 type MemberRow = {
   family_id: string;
   user_id: string;
@@ -68,6 +72,42 @@ export function accountApiErrorResponse(error: unknown) {
 
 function requireManager(family: FamilyAccess) {
   if (!isFamilyManager(family.role)) throw new AccountApiError("目前帳號沒有管理家庭成員的權限", 403);
+}
+
+async function inspectFamilyExit(family: FamilyAccess) {
+  const [familyResult, membersResult, stateResult, mediaResult, invitationsResult, permissionsResult] = await env.DB.batch([
+    env.DB.prepare("SELECT legacy_state FROM families WHERE id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM family_members WHERE family_id = ? AND status = 'active'").bind(family.familyId),
+    env.DB.prepare("SELECT data, updated_at FROM family_state WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM media_objects WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM family_invitations WHERE family_id = ?").bind(family.familyId),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM member_child_permissions WHERE family_id = ?").bind(family.familyId),
+  ]);
+  const familyRow = familyResult.results?.[0] as FamilyExitFamilyRow | undefined;
+  if (!familyRow) throw new AccountApiError("找不到目前家庭", 404);
+  const stateRow = stateResult.results?.[0] as FamilyExitStateRow | undefined;
+  const memberCount = Number((membersResult.results?.[0] as CountRow | undefined)?.count || 0);
+  const relatedDataCount = [mediaResult, invitationsResult, permissionsResult]
+    .reduce((total, result) => total + Number((result.results?.[0] as CountRow | undefined)?.count || 0), 0);
+  const stateIsEmpty = isEmptyFamilyState(stateRow?.data);
+  const familyIsEmpty = stateIsEmpty && relatedDataCount === 0;
+  const isLegacyFamily = Boolean(familyRow.legacy_state) || family.familyId === "legacy-family-v1";
+  const canLeave = family.role === "parent" || family.role === "child";
+  const canDeleteEmptyFamily = family.role === "owner" && memberCount === 1 && familyIsEmpty && !isLegacyFamily;
+  let blockedReason: string | null = null;
+  if (family.role === "owner") {
+    if (isLegacyFamily) blockedReason = "既有正式家庭不可刪除；如需離開，請先轉移 Owner。";
+    else if (memberCount > 1) blockedReason = "Owner 必須先將 Owner 轉移給另一位 Parent，才能離開家庭。";
+    else if (!familyIsEmpty) blockedReason = "家庭仍有孩子、星星、任務、獎勵、紀錄、圖片或邀請資料，不能刪除。";
+  }
+  return {
+    memberCount,
+    familyIsEmpty,
+    canLeave,
+    canDeleteEmptyFamily,
+    blockedReason,
+    stateUpdatedAt: stateRow?.updated_at ?? null,
+  };
 }
 
 export async function getFamilyChildren(familyId: string): Promise<ChildSummary[]> {
@@ -122,7 +162,25 @@ export async function getInvitationByToken(token: string, now = Date.now()) {
 }
 
 export async function getAccountManagementSnapshot(family: FamilyAccess, now = Date.now()) {
-  requireManager(family);
+  const exit = await inspectFamilyExit(family);
+  const familyExit = {
+    memberCount: exit.memberCount,
+    isEmpty: exit.familyIsEmpty,
+    canLeave: exit.canLeave,
+    canDeleteEmptyFamily: exit.canDeleteEmptyFamily,
+    blockedReason: exit.blockedReason,
+  };
+  if (!isFamilyManager(family.role)) {
+    return {
+      family: { id: family.familyId, name: family.familyName },
+      currentUser: { id: family.user.id, role: family.role },
+      children: [],
+      members: [],
+      activeInvitations: [],
+      invitationHistory: [],
+      familyExit,
+    };
+  }
   const children = await getFamilyChildren(family.familyId);
   const [membersResult, permissionsResult, invitationsResult] = await env.DB.batch([
     env.DB.prepare(
@@ -173,6 +231,7 @@ export async function getAccountManagementSnapshot(family: FamilyAccess, now = D
     members,
     activeInvitations: invitations.filter(invitation => invitation.status === "pending"),
     invitationHistory: invitations.filter(invitation => invitation.status !== "pending"),
+    familyExit,
   };
 }
 
@@ -307,6 +366,59 @@ export async function removeFamilyMember(family: FamilyAccess, userId: string) {
     env.DB.prepare("DELETE FROM sessions WHERE userId = ?").bind(userId),
     env.DB.prepare("DELETE FROM family_members WHERE family_id = ? AND user_id = ? AND role <> 'owner'").bind(family.familyId, userId),
   ]);
+}
+
+export async function leaveCurrentFamily(family: FamilyAccess) {
+  if (family.role === "owner") {
+    throw new AccountApiError("Owner 不能直接離開家庭；請先轉移 Owner，空白測試家庭則使用「刪除空白家庭」。", 409);
+  }
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM family_members
+        WHERE family_id = ? AND user_id = ? AND role IN ('parent', 'child') AND status = 'active'`,
+    ).bind(family.familyId, family.user.id),
+    env.DB.prepare(
+      `DELETE FROM sessions
+        WHERE userId = ?
+          AND NOT EXISTS (SELECT 1 FROM family_members WHERE user_id = ?)`,
+    ).bind(family.user.id, family.user.id),
+  ]);
+  if (Number(results[0].meta.changes || 0) !== 1) throw new AccountApiError("家庭關係已變更，請重新登入後再試", 409);
+}
+
+export async function deleteEmptyFamily(family: FamilyAccess) {
+  if (family.role !== "owner") throw new AccountApiError("只有 Owner 可以刪除空白家庭", 403);
+  const exit = await inspectFamilyExit(family);
+  if (!exit.canDeleteEmptyFamily) throw new AccountApiError(exit.blockedReason || "家庭不是可刪除的空白家庭", 409);
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM families
+        WHERE id = ?
+          AND id <> 'legacy-family-v1'
+          AND legacy_state = 0
+          AND (SELECT COUNT(*) FROM family_members WHERE family_id = families.id AND status = 'active') = 1
+          AND EXISTS (
+            SELECT 1 FROM family_members
+             WHERE family_id = families.id AND user_id = ? AND role = 'owner' AND status = 'active'
+          )
+          AND NOT EXISTS (SELECT 1 FROM media_objects WHERE family_id = families.id)
+          AND NOT EXISTS (SELECT 1 FROM family_invitations WHERE family_id = families.id)
+          AND NOT EXISTS (SELECT 1 FROM member_child_permissions WHERE family_id = families.id)
+          AND (
+            (? IS NULL AND NOT EXISTS (SELECT 1 FROM family_state WHERE family_id = families.id))
+            OR EXISTS (
+              SELECT 1 FROM family_state
+               WHERE family_id = families.id AND updated_at = ?
+            )
+          )`,
+    ).bind(family.familyId, family.user.id, exit.stateUpdatedAt, exit.stateUpdatedAt),
+    env.DB.prepare(
+      `DELETE FROM sessions
+        WHERE userId = ?
+          AND NOT EXISTS (SELECT 1 FROM family_members WHERE user_id = ?)`,
+    ).bind(family.user.id, family.user.id),
+  ]);
+  if (Number(results[0].meta.changes || 0) !== 1) throw new AccountApiError("家庭資料已變更，未執行刪除，請重新整理確認", 409);
 }
 
 export async function acceptFamilyInvitation(
