@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getLegalDocument, legalDocuments } from "../content";
+import { getLegalDocument } from "../content";
 import { LegalDocumentLayout } from "../legal-document-layout";
 import { ContactForm } from "../contact-form";
 import { legalDocumentMetadata } from "../metadata";
 
 type LegalDocumentPageProps = { params: Promise<{ slug: string }> };
 
-export function generateStaticParams() {
-  return legalDocuments.map(document => ({ slug: document.slug }));
-}
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: LegalDocumentPageProps): Promise<Metadata> {
   const { slug } = await params;

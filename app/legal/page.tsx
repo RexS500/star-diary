@@ -3,6 +3,8 @@ import { LEGAL_CENTER_VERSION, LEGAL_LAST_UPDATED, LEGAL_STATUS_LABEL } from "./
 import { legalDocuments } from "./content";
 import { legalMetadata } from "./metadata";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = legalMetadata({
   title: "法律中心",
   description: "集中查閱星星日記的隱私、服務條款、兒童資料保護與相關法律文件。",

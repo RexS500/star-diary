@@ -24,7 +24,7 @@ test("legal center uses a shared dynamic route and independent document modules"
     assert.ok(source.includes('status: "effective"'));
     assert.ok(source.includes('effectiveDate: "2026-07-22"'));
   }
-  assert.match(route, /generateStaticParams/);
+  assert.match(route, /dynamic = "force-dynamic"/);
   assert.match(route, /getLegalDocument/);
   assert.match(route, /LegalDocumentLayout/);
   assert.match(route, /ContactForm/);
