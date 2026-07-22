@@ -15,7 +15,7 @@ function unzipStored(buffer) {
   return files;
 }
 
-test("Excel workbook contains five formatted analysis sheets", () => {
+test("Excel workbook contains eight formatted analysis sheets", () => {
   const workbook = buildAnalyticsWorkbook({
     child: "Vanessa",
     from: "2026-07-12",
@@ -28,13 +28,13 @@ test("Excel workbook contains five formatted analysis sheets", () => {
   });
   const files = unzipStored(workbook), workbookXml = files.get("xl/workbook.xml"), styles = files.get("xl/styles.xml");
   assert.ok(workbook.byteLength > 5_000);
-  for (const name of ["報表摘要", "星星明細", "每日統計", "每日任務完成紀錄", "兌換統計"]) assert.match(workbookXml, new RegExp(`name="${name}"`));
-  assert.equal([...files.keys()].filter(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).length, 5);
+  for (const name of ["報表摘要", "星星明細", "每日統計", "每日任務完成紀錄", "兌換統計", "每日任務達成率", "任務健康度", "已養成習慣"]) assert.match(workbookXml, new RegExp(`name="${name}"`));
+  assert.equal([...files.keys()].filter(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).length, 8);
   assert.match(styles, /formatCode="yyyy-mm-dd"/);
   assert.match(styles, /formatCode="yyyy-mm-dd hh:mm"/);
   assert.match(styles, /FFE2F0D9/);
   assert.match(styles, /FFFCE4D6/);
   assert.match(styles, /FFFFF2CC/);
-  for (let index = 1; index <= 5; index++) assert.match(files.get(`xl/worksheets/sheet${index}.xml`), /state="frozen"/);
+  for (let index = 1; index <= 8; index++) assert.match(files.get(`xl/worksheets/sheet${index}.xml`), /state="frozen"/);
   assert.match(files.get("xl/worksheets/sheet2.xml"), /<autoFilter ref="A1:G2"\/>/);
 });

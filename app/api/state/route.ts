@@ -135,6 +135,12 @@ function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
         const rawApplicable = Array.isArray(task.applicableChildIds) ? task.applicableChildIds : legacyChildId ? [legacyChildId] : [];
         const applicableChildIds = [...new Set(rawApplicable.filter((childId): childId is string => typeof childId === "string" && childIds.has(childId)))];
         const createdAt = validIso(task.createdAt) ? task.createdAt : nowIso;
+        const habitStatus = task.habitStatus === "graduated" ? "graduated" : "active";
+        const habitHistory = Array.isArray(task.habitHistory) ? task.habitHistory.flatMap(rawEntry => {
+            const entry = asRecord(rawEntry);
+            if ((entry.status !== "active" && entry.status !== "graduated") || !validIso(entry.at)) return [];
+            return [{ status: entry.status, at: entry.at, ...(typeof entry.by === "string" && entry.by ? { by: entry.by } : {}) }];
+        }).slice(-50) : [];
         return {
             id: typeof task.id === "string" && task.id ? task.id : crypto.randomUUID(),
             applicableChildIds,
@@ -142,7 +148,7 @@ function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
             icon: typeof task.icon === "string" && task.icon.trim() ? task.icon : "⭐",
             rewardStars: positiveInt(task.rewardStars),
             weekdays: uniqueWeekdays(task.weekdays),
-            enabled: task.enabled !== false && applicableChildIds.length > 0,
+            enabled: habitStatus !== "graduated" && task.enabled !== false && applicableChildIds.length > 0,
             sortOrder: Number.isFinite(Number(task.sortOrder)) ? Math.floor(Number(task.sortOrder)) : index,
             customOrder: Number.isFinite(Number(task.customOrder)) ? Math.floor(Number(task.customOrder)) : index,
             timeSlot: taskTimeSlots.has(task.timeSlot) ? task.timeSlot : "anytime",
@@ -151,6 +157,11 @@ function normalizeDailyTasks(value: unknown, childIds: Set<string>) {
             createdAt,
             updatedAt: validIso(task.updatedAt) ? task.updatedAt : createdAt,
             scheduleStart: validDateKey(task.scheduleStart) ? task.scheduleStart : today,
+            habitStatus,
+            ...(validIso(task.graduatedAt) ? { graduatedAt: task.graduatedAt } : {}),
+            ...(typeof task.graduatedBy === "string" && task.graduatedBy ? { graduatedBy: task.graduatedBy } : {}),
+            ...(validIso(task.resumedAt) ? { resumedAt: task.resumedAt } : {}),
+            ...(habitHistory.length ? { habitHistory } : {}),
         } satisfies DailyTaskDefinition;
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt));
 }
@@ -265,11 +276,23 @@ function prepareTaskDefinitionsForSave(previous: DailyTaskDefinition[], incoming
     const oldById = new Map(previous.map(task => [task.id, task])), nowIso = new Date().toISOString(), today = taipeiDateKey();
     return incoming.map((task, index) => {
         const old = oldById.get(task.id);
-        if (!old) return { ...task, sortOrder: index, createdAt: nowIso, updatedAt: nowIso, scheduleStart: today };
+        if (!old) return { ...task, habitStatus: "active" as const, sortOrder: index, createdAt: nowIso, updatedAt: nowIso, scheduleStart: today };
         const applicabilityChanged = old.applicableChildIds.join(",") !== task.applicableChildIds.join(",");
         const scheduleChanged = old.enabled !== task.enabled || old.weekdays.join(",") !== task.weekdays.join(",") || applicabilityChanged;
         const changed = scheduleChanged || old.title !== task.title || old.icon !== task.icon || old.rewardStars !== task.rewardStars || old.sortOrder !== index || old.customOrder !== task.customOrder || old.timeSlot !== task.timeSlot;
-        return { ...task, sortOrder: index, createdAt: old.createdAt, scheduleStart: scheduleChanged && task.enabled ? today : old.scheduleStart, updatedAt: changed ? nowIso : old.updatedAt };
+        return {
+            ...task,
+            habitStatus: old.habitStatus || "active",
+            graduatedAt: old.graduatedAt,
+            graduatedBy: old.graduatedBy,
+            resumedAt: old.resumedAt,
+            habitHistory: old.habitHistory,
+            enabled: old.habitStatus === "graduated" ? false : task.enabled,
+            sortOrder: index,
+            createdAt: old.createdAt,
+            scheduleStart: scheduleChanged && task.enabled ? today : old.scheduleStart,
+            updatedAt: changed ? nowIso : old.updatedAt,
+        };
     });
 }
 
@@ -726,6 +749,50 @@ export async function POST(req: Request) {
                 return completeDailyTask(state, record, "parent", { backfilled: true });
             });
             await recordDailyTaskCompletionEvents(result.state, createdRecordId, family, "parent_backfill_current_definition");
+            return Response.json(accessPayload(result.state, result.revision, family, permissions));
+        }
+
+        if (body.action === "parent_daily_task_habit_action") {
+            requireFamilyManager(family);
+            if (body.operation !== "graduate" && body.operation !== "reactivate") throw new ApiError("不支援的習慣操作", 400);
+            const operation = body.operation;
+            const result = await mutateState(familyId, async state => {
+                await requireParent(state, body.password || "");
+                const task = state.dailyTasks.find(item => item.id === body.definitionId);
+                if (!task) throw new ApiError("找不到每日任務，請刷新後再試", 404);
+                const nowIso = new Date().toISOString(), today = taipeiDateKey();
+                const history = [...(task.habitHistory || [])];
+                if (operation === "graduate") {
+                    if (task.habitStatus === "graduated") return false;
+                    task.habitStatus = "graduated";
+                    task.graduatedAt = nowIso;
+                    task.graduatedBy = family.user.id;
+                    task.enabled = false;
+                    history.push({ status: "graduated", at: nowIso, by: family.user.id });
+                    task.habitHistory = history.slice(-50);
+                    task.updatedAt = nowIso;
+                    state.dailyTaskRecords = state.dailyTaskRecords.filter(record => !(record.definitionId === task.id && record.date === today && record.status === "pending"));
+                    return true;
+                }
+                if (task.habitStatus !== "graduated") return false;
+                task.habitStatus = "active";
+                task.enabled = true;
+                task.resumedAt = nowIso;
+                task.scheduleStart = today;
+                delete task.graduatedAt;
+                delete task.graduatedBy;
+                history.push({ status: "active", at: nowIso, by: family.user.id });
+                task.habitHistory = history.slice(-50);
+                task.updatedAt = nowIso;
+                return true;
+            });
+            await recordOperationalEvent({
+                eventType: operation === "graduate" ? "daily_task_graduated" : "daily_task_reactivated",
+                familyId,
+                userId: family.user.id,
+                source: "task_analytics",
+                dedupeKey: `daily-task-habit:${familyId}:${body.definitionId}:${result.revision}`,
+            });
             return Response.json(accessPayload(result.state, result.revision, family, permissions));
         }
 

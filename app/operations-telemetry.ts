@@ -5,6 +5,8 @@ export type OperationalEventType =
   | "member_created"
   | "daily_task_created"
   | "daily_task_completed"
+  | "daily_task_graduated"
+  | "daily_task_reactivated"
   | "challenge_task_completed"
   | "star_add"
   | "star_deduct"

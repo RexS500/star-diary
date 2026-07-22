@@ -5,6 +5,13 @@ export type DailyTaskGoalMode = "all" | "percentage" | "count";
 export type DailyTaskCompletionMode = "instant" | "approval";
 export type DailyTaskSortMode = "flow" | "custom";
 export type DailyTaskTimeSlot = "wake_up" | "before_breakfast" | "before_school" | "after_school" | "after_dinner" | "before_bed" | "anytime";
+export type DailyTaskHabitStatus = "active" | "graduated";
+
+export type DailyTaskHabitHistoryEntry = {
+    status: DailyTaskHabitStatus;
+    at: string;
+    by?: string;
+};
 
 export type DailyTaskDefinition = {
     id: string;
@@ -22,6 +29,11 @@ export type DailyTaskDefinition = {
     createdAt: string;
     updatedAt: string;
     scheduleStart: string;
+    habitStatus?: DailyTaskHabitStatus;
+    graduatedAt?: string;
+    graduatedBy?: string;
+    resumedAt?: string;
+    habitHistory?: DailyTaskHabitHistoryEntry[];
 };
 
 export type DailyTaskRecord = {
@@ -200,6 +212,7 @@ export function currentDefinitionBackfillCandidates(
     const existing = new Set(records.map(record => `${record.definitionId}|${record.childId}|${record.date}`));
     return [...definitions]
         .filter(task => task.enabled
+            && task.habitStatus !== "graduated"
             && task.applicableChildIds.includes(childId)
             && task.weekdays.includes(weekday)
             && !existing.has(`${task.id}|${childId}|${dateKey}`))
@@ -269,6 +282,6 @@ export function calculateTaskStreak(records: DailyTaskRecord[], settings: DailyT
     return streak;
 }
 
-export function isTaskScheduled(task: Pick<DailyTaskDefinition, "enabled" | "weekdays" | "scheduleStart">, dateKey: string) {
-    return isCalendarDateKey(task.scheduleStart) && isCalendarDateKey(dateKey) && task.enabled && task.scheduleStart <= dateKey && task.weekdays.includes(weekdayForDateKey(dateKey));
+export function isTaskScheduled(task: Pick<DailyTaskDefinition, "enabled" | "weekdays" | "scheduleStart" | "habitStatus">, dateKey: string) {
+    return task.habitStatus !== "graduated" && isCalendarDateKey(task.scheduleStart) && isCalendarDateKey(dateKey) && task.enabled && task.scheduleStart <= dateKey && task.weekdays.includes(weekdayForDateKey(dateKey));
 }

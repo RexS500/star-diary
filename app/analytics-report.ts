@@ -14,7 +14,6 @@ import {
     addCalendarDays,
     calculateTaskStreak,
     calendarDateRange,
-    taskProgress,
     taskSettingsForChild,
     taipeiDateKey,
     type DailyTaskDefinition,
@@ -22,6 +21,15 @@ import {
     type DailyTaskSettingsMap,
 } from "./daily-task-logic.ts";
 import { isCompletedStarRedemption, isEffectiveStarRecord, redemptionStarCost } from "./star-balance.ts";
+import {
+    buildDailyTaskCompletionSeries,
+    buildGraduatedHabitMetrics,
+    buildTaskHealthMetrics,
+    calculateWeightedCompletionRate,
+    type DailyTaskCompletionMetric,
+    type GraduatedHabitMetric,
+    type TaskHealthMetric,
+} from "./task-analytics.ts";
 
 export type AnalyticsRangePreset = "two_weeks" | "current_month" | "previous_month" | "last_30_days" | "custom" | "all";
 
@@ -70,7 +78,7 @@ export type DailyStatisticsRow = {
 export type DailyTaskReportRow = {
     date: string;
     title: string;
-    status: "已完成" | "未完成" | "今日不適用" | "等待家長確認";
+    status: "已完成" | "未完成" | "今日不適用" | "等待家長確認" | "進行中";
     completedAt: string;
     rewardStars: number;
     applicableChild: string;
@@ -105,6 +113,9 @@ export type AnalyticsReport = {
     starDetails: StarDetailRow[];
     dailyStatistics: DailyStatisticsRow[];
     taskRows: DailyTaskReportRow[];
+    dailyTaskCompletion: DailyTaskCompletionMetric[];
+    taskHealth: TaskHealthMetric[];
+    graduatedHabits: GraduatedHabitMetric[];
     redemptionRows: RedemptionReportRow[];
     redemptionSummary: {
         count: number;
@@ -259,13 +270,6 @@ function dateTimeText(value: unknown, fallback: unknown) {
     return Number.isFinite(selected) ? new Date(selected).toISOString() : String(value ?? fallback ?? "");
 }
 
-function statusForTask(record: DailyTaskRecord): DailyTaskReportRow["status"] {
-    if (record.status === "completed") return "已完成";
-    if (record.status === "skipped") return "今日不適用";
-    if (record.status === "pending_approval") return "等待家長確認";
-    return "未完成";
-}
-
 export function buildAnalyticsReport(input: {
     childId: string;
     childName: string;
@@ -305,19 +309,24 @@ export function buildAnalyticsReport(input: {
             };
         });
 
-    const taskRecords = input.dailyTaskRecords
-        .filter(item => item.childId === input.childId && item.date >= input.range.start && item.date <= input.range.end)
-        .sort((left, right) => left.date.localeCompare(right.date) || left.titleSnapshot.localeCompare(right.titleSnapshot, "zh-TW"));
-    const selectedTaskProgress = taskProgress(taskRecords);
-    const completedTasks = taskRecords.filter(item => item.status === "completed").length;
-    const skippedTasks = taskRecords.filter(item => item.status === "skipped").length;
-    const incompleteTasks = taskRecords.length - completedTasks - skippedTasks;
-    const taskRows: DailyTaskReportRow[] = taskRecords.map(record => ({
-        date: record.date,
-        title: record.titleSnapshot,
-        status: statusForTask(record),
-        completedAt: record.completedAt || record.approvedAt || "",
-        rewardStars: finiteInteger(record.rewardStarsSnapshot),
+    const dailyTaskCompletion = buildDailyTaskCompletionSeries({
+        childId: input.childId,
+        start: input.range.start,
+        end: input.range.end,
+        todayKey: input.todayKey,
+        definitions: input.dailyTasks,
+        records: input.dailyTaskRecords,
+    });
+    const completionExecutions = dailyTaskCompletion.flatMap(day => day.executions);
+    const completedTasks = completionExecutions.filter(item => item.status === "completed").length;
+    const skippedTasks = completionExecutions.filter(item => item.status === "not_applicable").length;
+    const incompleteTasks = completionExecutions.filter(item => item.status === "missed").length;
+    const taskRows: DailyTaskReportRow[] = completionExecutions.map(execution => ({
+        date: execution.date,
+        title: execution.title,
+        status: execution.status === "completed" ? "已完成" : execution.status === "not_applicable" ? "今日不適用" : execution.status === "in_progress" ? "進行中" : "未完成",
+        completedAt: execution.completedAt || "",
+        rewardStars: execution.rewardStars,
         applicableChild: input.childName,
     }));
 
@@ -339,13 +348,13 @@ export function buildAnalyticsReport(input: {
         else if (entry.type === "deduct") day.deducted += amount;
         else if (entry.type === "special") day.special += amount;
     }
-    for (const record of taskRecords) {
-        const day = dailyMap.get(record.date);
+    for (const metric of dailyTaskCompletion) {
+        const day = dailyMap.get(metric.date);
         if (!day) continue;
-        day.scheduledTasks += 1;
-        if (record.status === "completed") day.completedTasks += 1;
-        else if (record.status === "skipped") day.skippedTasks += 1;
-        else day.incompleteTasks += 1;
+        day.scheduledTasks = metric.scheduledCount;
+        day.completedTasks = metric.completedCount;
+        day.skippedTasks = metric.notApplicableCount;
+        day.incompleteTasks = metric.missedCount + metric.inProgressCount;
     }
     const dailyStatistics: DailyStatisticsRow[] = [...dailyMap.values()].map(day => {
         const effective = day.completedTasks + day.incompleteTasks;
@@ -385,6 +394,20 @@ export function buildAnalyticsReport(input: {
     const highestCostReward = [...groupedRedemptions].sort((a, b) => b.totalCost - a.totalCost || b.quantity - a.quantity || a.name.localeCompare(b.name, "zh-TW"))[0]?.name || "無";
     const special = entries.filter(item => item.type === "special").reduce((sum, item) => sum + finiteInteger(item.amount), 0);
     const redemptionCost = completedRows.reduce((sum, item) => sum + item.totalCost, 0);
+    const taskHealth = buildTaskHealthMetrics({
+        childId: input.childId,
+        start: input.range.start,
+        end: input.range.end,
+        todayKey: input.todayKey,
+        definitions: input.dailyTasks,
+        records: input.dailyTaskRecords,
+    });
+    const graduatedHabits = buildGraduatedHabitMetrics({
+        childId: input.childId,
+        todayKey: input.todayKey,
+        definitions: input.dailyTasks,
+        records: input.dailyTaskRecords,
+    });
 
     return {
         childName: input.childName,
@@ -397,7 +420,7 @@ export function buildAnalyticsReport(input: {
             special,
             net: starAnalysis.net,
             redemptionCost,
-            taskCompletionRate: selectedTaskProgress.percentage,
+            taskCompletionRate: calculateWeightedCompletionRate(dailyTaskCompletion, { excludeTodayInProgress: true }),
             streak: calculateTaskStreak(
                 input.dailyTaskRecords.filter(item => item.childId === input.childId),
                 taskSettingsForChild(input.dailyTaskSettings, input.childId),
@@ -410,6 +433,9 @@ export function buildAnalyticsReport(input: {
         starDetails,
         dailyStatistics,
         taskRows,
+        dailyTaskCompletion,
+        taskHealth,
+        graduatedHabits,
         redemptionRows,
         redemptionSummary: {
             count: completedRows.length,

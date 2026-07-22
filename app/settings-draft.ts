@@ -59,6 +59,15 @@ export function normalizeSettingsForComparison(state: ComparableSettingsState, n
       timeSlot: text(task.timeSlot),
       sourceType: text(task.sourceType),
       sourceOfficialTaskId: text(task.sourceOfficialTaskId),
+      habitStatus: task.habitStatus === "graduated" ? "graduated" : "active",
+      graduatedAt: text(task.graduatedAt),
+      graduatedBy: text(task.graduatedBy),
+      resumedAt: text(task.resumedAt),
+      habitHistory: (task.habitHistory || []).map(entry => ({
+        status: entry.status,
+        at: text(entry.at),
+        by: text(entry.by),
+      })),
     })),
     dailyTaskSettings: state.children.map(child => {
       const settings = taskSettingsForChild(state.dailyTaskSettings, child.id);

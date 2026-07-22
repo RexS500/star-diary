@@ -103,3 +103,17 @@ test("current task definitions can create a separately marked yesterday backfill
   assert.match(block,/backfillSource: "current_definition"/);
   assert.match(block,/completeDailyTask\(state, record, "parent", \{ backfilled: true \}\)/);
 });
+
+test("habit graduation is a parent-only server action that preserves history",()=>{
+  const start=source.indexOf('if (body.action === "parent_daily_task_habit_action")');
+  const end=source.indexOf('if (body.action === "parent_daily_task_action")',start);
+  const block=source.slice(start,end);
+  assert.ok(start>0);
+  assert.match(block,/requireFamilyManager\(family\)/);
+  assert.match(block,/await requireParent/);
+  assert.match(block,/task\.habitStatus = "graduated"/);
+  assert.match(block,/task\.enabled = false/);
+  assert.match(block,/task\.scheduleStart = today/);
+  assert.match(block,/task\.habitHistory/);
+  assert.match(block,/delete task\.graduatedAt/);
+});

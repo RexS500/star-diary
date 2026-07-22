@@ -259,3 +259,20 @@ test("official task library is wired into the existing family daily task setting
   assert.match(css,/\.official-library-shell/);
   assert.match(css,/@media\(max-width:560px\)/);
 });
+
+test("task analytics, health recommendations, and habit graduation are wired into the shared task system", async () => {
+  const [home, analytics, css] = await Promise.all([
+    readFile(new URL("../app/star-home.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/task-analytics.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  for (const text of ["每日任務達成率分析", "任務健康度與調整建議", "已養成習慣", "習慣畢業", "依目前設定補登"]) assert.match(home, new RegExp(text));
+  assert.match(home, /parent_daily_task_habit_action/);
+  assert.match(home, /daily-task-setting-/);
+  assert.match(analytics, /fromHistoricalRecord/);
+  assert.match(analytics, /current_definition/);
+  assert.match(analytics, /scheduledCount >= 20/);
+  assert.match(css, /\.task-completion-chart/);
+  assert.match(css, /\.task-health-grid/);
+  assert.match(css, /@media\(max-width:480px\)/);
+});

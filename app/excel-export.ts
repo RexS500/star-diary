@@ -152,6 +152,9 @@ function normalizedReport(input: AnalyticsReport | LegacyWorkbookInput): Analyti
         starDetails: input.rows.map(row => ({ occurredAt: row.date, createdAt: row.date, type: row.type === "star" ? "加星" : "扣星", source: "手動補登", content: row.title, amount: row.amount, note: "" })),
         dailyStatistics: days,
         taskRows: [],
+        dailyTaskCompletion: [],
+        taskHealth: [],
+        graduatedHabits: [],
         redemptionRows: [],
         redemptionSummary: { count: 0, quantity: 0, totalCost: 0, mostFrequentReward: "無", highestCostReward: "無" },
     };
@@ -209,12 +212,68 @@ function reportSheets(report: AnalyticsReport): SheetDefinition[] {
         ...report.redemptionRows.map(row => [cell(row.redeemedAt, STYLE.bodyDateTime, "datetime"), cell(row.rewardName), cell(row.quantity, STYLE.bodyNumber), cell(row.unitCost, STYLE.bodyNumber), cell(row.totalCost, STYLE.bodyNumber), cell(row.status)]),
     ];
 
+    const completionRows: Cell[][] = [["日期", "排定任務數", "完成任務數", "未完成任務數", "今日不適用數", "補登完成數", "進行中數", "達成率(%)", "備註"].map(value => cell(value, STYLE.header))];
+    completionRows.push(...report.dailyTaskCompletion.map(row => [
+        cell(row.date, STYLE.bodyDate, "date"),
+        cell(row.scheduledCount, STYLE.bodyNumber),
+        cell(row.completedCount, STYLE.bodyNumber),
+        cell(row.missedCount, STYLE.bodyNumber),
+        cell(row.notApplicableCount, STYLE.bodyNumber),
+        cell(row.backfilledCount, STYLE.bodyNumber),
+        cell(row.inProgressCount, STYLE.bodyNumber),
+        row.completionRate === null ? cell("—") : cell(row.completionRate / 100, STYLE.bodyPercent, "percent"),
+        cell(row.isFuture ? "未來日期" : row.isTodayInProgress ? "今天進行中，尚未完成不列入健康度" : ""),
+    ]));
+
+    const healthLabels = {
+        insufficient_data: "資料不足",
+        established: "已建立",
+        stable: "穩定",
+        developing: "發展中",
+        observe: "持續觀察",
+        needs_review: "需要檢視",
+    } as const;
+    const maturityLabels = { building: "建立中", developing: "發展中", stable: "穩定", established: "已養成", graduated: "已畢業" } as const;
+    const healthRows: Cell[][] = [["任務名稱", "分析起日", "分析迄日", "排定次數", "完成次數", "未完成次數", "不適用次數", "完成率(%)", "目前連續完成", "最長連續完成", "目前連續未完成", "最長連續未完成", "健康狀態", "習慣成熟度", "補登比例", "調整建議"].map(value => cell(value, STYLE.header))];
+    healthRows.push(...report.taskHealth.map(row => [
+        cell(`${row.icon} ${row.title}`),
+        cell(row.rangeStart, STYLE.bodyDate, "date"),
+        cell(row.rangeEnd, STYLE.bodyDate, "date"),
+        cell(row.scheduledCount, STYLE.bodyNumber),
+        cell(row.completedCount, STYLE.bodyNumber),
+        cell(row.missedCount, STYLE.bodyNumber),
+        cell(row.notApplicableCount, STYLE.bodyNumber),
+        row.completionRate === null ? cell("—") : cell(row.completionRate / 100, STYLE.bodyPercent, "percent"),
+        cell(row.currentCompletionStreak, STYLE.bodyNumber),
+        cell(row.longestCompletionStreak, STYLE.bodyNumber),
+        cell(row.currentMissStreak, STYLE.bodyNumber),
+        cell(row.longestMissStreak, STYLE.bodyNumber),
+        cell(healthLabels[row.healthStatus]),
+        cell(maturityLabels[row.maturityStatus]),
+        cell(row.backfillRatio, STYLE.bodyPercent, "percent"),
+        cell(row.recommendations.join("；")),
+    ]));
+
+    const graduatedRows: Cell[][] = [["任務名稱", "畢業日期", "畢業前 30 天排定次數", "畢業前 30 天完成次數", "畢業前 30 天完成率(%)", "歷史完成總數", "畢業次數"].map(value => cell(value, STYLE.header))];
+    graduatedRows.push(...report.graduatedHabits.map(row => [
+        cell(`${row.icon} ${row.title}`),
+        row.graduatedAt ? cell(row.graduatedAt, STYLE.bodyDateTime, "datetime") : cell("—"),
+        cell(row.lastThirtyDaysScheduled, STYLE.bodyNumber),
+        cell(row.lastThirtyDaysCompleted, STYLE.bodyNumber),
+        row.lastThirtyDaysRate === null ? cell("—") : cell(row.lastThirtyDaysRate / 100, STYLE.bodyPercent, "percent"),
+        cell(row.totalCompleted, STYLE.bodyNumber),
+        cell(row.graduationCount, STYLE.bodyNumber),
+    ]));
+
     return [
         { name: "報表摘要", rows: summaryRows, filterRow: 1 },
         { name: "星星明細", rows: detailRows, filterRow: 1 },
         { name: "每日統計", rows: dailyRows, filterRow: 1 },
         { name: "每日任務完成紀錄", rows: taskRows, filterRow: 1 },
         { name: "兌換統計", rows: redemptionRows, filterRow: 8 },
+        { name: "每日任務達成率", rows: completionRows, filterRow: 1 },
+        { name: "任務健康度", rows: healthRows, filterRow: 1 },
+        { name: "已養成習慣", rows: graduatedRows, filterRow: 1 },
     ];
 }
 
