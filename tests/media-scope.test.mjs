@@ -5,17 +5,17 @@ import {
   isFamilyScopedMediaKey,
   mediaKeyBelongsToFamily,
   mediaKeyFromUrl,
-  safeMediaFilename,
+  mediaKeysInState,
   stateReferencesMediaKey,
 } from "../app/media-scope.ts";
 
-test("new R2 object keys include an unambiguous family namespace", () => {
-  const key = buildFamilyMediaKey("family-a", "avatars", "孩子 1.jpg", "fixed-id");
-  assert.equal(key, "families/family-a/avatars/fixed-id-1.jpg");
+test("new R2 object keys include only a family namespace, random id, and WebP extension", () => {
+  const key = buildFamilyMediaKey("family-a", "avatars", "fixed-id");
+  assert.equal(key, "families/family-a/avatars/fixed-id.webp");
   assert.equal(mediaKeyBelongsToFamily(key, "family-a"), true);
   assert.equal(mediaKeyBelongsToFamily(key, "family-b"), false);
   assert.equal(isFamilyScopedMediaKey(key), true);
-  assert.equal(safeMediaFilename("../../private?.png"), "....private.png");
+  assert.doesNotMatch(key, /孩子|jpg|png/i);
 });
 
 test("legacy media is readable only when the current family's state references it", () => {
@@ -26,6 +26,7 @@ test("legacy media is readable only when the current family's state references i
   assert.equal(stateReferencesMediaKey(stateA, key), true);
   assert.equal(stateReferencesMediaKey(stateB, key), false);
   assert.equal(isFamilyScopedMediaKey(key), false);
+  assert.deepEqual([...mediaKeysInState(stateA)], [key]);
 });
 
 test("a foreign new-format key can never fall back to legacy reference checks", async () => {

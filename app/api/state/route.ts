@@ -40,6 +40,7 @@ import {
     recordOperationalEvent,
     requestTraceId,
 } from "../../operations-telemetry";
+import { mediaKeyBelongsToFamily, mediaKeysInState } from "../../media-scope";
 
 const initial = {
     children: [],
@@ -328,6 +329,34 @@ async function writeState(state: StoredState, previousRevision: number, familyId
     const result = await env.DB.prepare("UPDATE family_state SET data=?,updated_at=? WHERE family_id=? AND updated_at=?").bind(JSON.stringify(normalized), revision, familyId, previousRevision).run();
     if (Number(result.meta.changes || 0) !== 1) throw new ApiError("資料已被其他裝置更新，請重新整理後再操作", 409);
     return { state: normalized, revision };
+}
+
+async function cleanupUnreferencedFamilyMedia(before: StoredState, after: StoredState, familyId: string, userId: string) {
+    const afterKeys = mediaKeysInState(after);
+    const removedKeys = [...mediaKeysInState(before)].filter(key => !afterKeys.has(key) && mediaKeyBelongsToFamily(key, familyId));
+    for (const key of removedKeys) {
+        try {
+            const row = await env.DB.prepare(
+                "SELECT family_id FROM media_objects WHERE object_key = ?",
+            ).bind(key).first<{ family_id: string }>();
+            if (row?.family_id !== familyId) continue;
+            await env.MEDIA.delete(key);
+            await env.DB.prepare(
+                "DELETE FROM media_objects WHERE family_id = ? AND object_key = ?",
+            ).bind(familyId, key).run();
+        } catch (error) {
+            await recordOperationalError({
+                category: "image_cleanup_failed",
+                error,
+                route: "/api/state",
+                method: "POST",
+                statusCode: 500,
+                familyId,
+                userId,
+                metadata: { objectKey: key },
+            });
+        }
+    }
 }
 
 async function mutateState(familyId: string, mutator: (state: StoredState) => Promise<boolean | void> | boolean | void) {
@@ -909,6 +938,7 @@ export async function POST(req: Request) {
             familyId,
             userId: family.user.id,
         });
+        await cleanupUnreferencedFamilyMedia(current.state, saved.state, familyId, family.user.id);
         return Response.json(accessPayload(saved.state, saved.revision, family, permissions));
     } catch (error) {
         if (error instanceof FamilyAccessError) return familyAccessErrorResponse(error);

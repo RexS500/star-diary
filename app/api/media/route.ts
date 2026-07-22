@@ -13,6 +13,7 @@ import {
   type MediaKind,
 } from "../../media-scope";
 import { recordOperationalError, recordOperationalEvent, requestTraceId } from "../../operations-telemetry";
+import { MAX_SMALL_IMAGE_DIMENSION, MAX_STORED_IMAGE_BYTES, validateStoredWebp } from "../../webp-validation";
 
 type FamilyStateRow = { data: string };
 type MediaRow = { family_id: string };
@@ -44,17 +45,29 @@ export async function POST(req: Request) {
     if (!file || typeof file === "string" || typeof file.arrayBuffer !== "function") {
       return Response.json({ error: "請先選擇圖片" }, { status: 400, headers: privateHeaders });
     }
-    if (file.type && !file.type.startsWith("image/")) {
-      return Response.json({ error: "檔案必須是圖片" }, { status: 400, headers: privateHeaders });
+    const filename = "name" in file && typeof file.name === "string" ? file.name : "";
+    if (file.type.toLowerCase() !== "image/webp") {
+      return Response.json({ error: "圖片必須先壓縮並轉換成 WebP" }, { status: 415, headers: privateHeaders });
     }
-    if (file.size > 8 * 1024 * 1024) {
-      return Response.json({ error: "圖片請小於 8 MB" }, { status: 400, headers: privateHeaders });
+    if (!filename.toLowerCase().endsWith(".webp")) {
+      return Response.json({ error: "圖片副檔名必須是 .webp" }, { status: 415, headers: privateHeaders });
+    }
+    if (file.size > MAX_STORED_IMAGE_BYTES) {
+      return Response.json({ error: "壓縮後圖片必須小於 500 KB" }, { status: 413, headers: privateHeaders });
+    }
+    const bytes = await file.arrayBuffer();
+    try {
+      validateStoredWebp(bytes, MAX_SMALL_IMAGE_DIMENSION);
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : "圖片內容不符合安全規格" },
+        { status: 415, headers: privateHeaders },
+      );
     }
 
-    const filename = "name" in file && typeof file.name === "string" ? file.name : "image";
-    uploadedKey = buildFamilyMediaKey(family.familyId, kind, filename);
-    await env.MEDIA.put(uploadedKey, await file.arrayBuffer(), {
-      httpMetadata: { contentType: file.type || "image/jpeg" },
+    uploadedKey = buildFamilyMediaKey(family.familyId, kind);
+    await env.MEDIA.put(uploadedKey, bytes, {
+      httpMetadata: { contentType: "image/webp" },
     });
     try {
       await env.DB.prepare(
@@ -67,8 +80,8 @@ export async function POST(req: Request) {
         kind,
         family.user.id,
         new Date().toISOString(),
-        file.size,
-        file.type || "image/jpeg",
+        bytes.byteLength,
+        "image/webp",
       ).run();
     } catch (error) {
       await env.MEDIA.delete(uploadedKey).catch(() => undefined);
@@ -79,7 +92,7 @@ export async function POST(req: Request) {
       eventType: "image_uploaded",
       familyId: family.familyId,
       userId: family.user.id,
-      amount: file.size,
+      amount: bytes.byteLength,
       source: kind,
       dedupeKey: `image_uploaded:${uploadedKey}`,
     });

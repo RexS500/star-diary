@@ -49,6 +49,7 @@ function NewFamilyOnboarding({ account }: { account: SignedInUser }) {
   const [childGender, setChildGender] = useState<"boy" | "girl">("boy");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [existingFamily, setExistingFamily] = useState(false);
 
   function nextStep() {
     if (!familyName.trim()) return setError("請輸入家庭名稱");
@@ -66,10 +67,11 @@ function NewFamilyOnboarding({ account }: { account: SignedInUser }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "create_family", familyName, childName, childGender }),
       });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as { error?: string; code?: string };
       if (!response.ok) {
         if (response.status === 409) {
-          window.location.replace("/");
+          setExistingFamily(true);
+          setError(result.error || "每個 Google 帳號只能建立一個家庭。");
           return;
         }
         throw new Error(result.error || "建立家庭失敗");
@@ -87,6 +89,11 @@ function NewFamilyOnboarding({ account }: { account: SignedInUser }) {
     <section className="family-onboarding-card new-family-wizard" aria-busy={busy}>
       <img src="/star-diary-logo.jpg" alt="" width={92} height={92}/>
       <p className="eyebrow">NEW FAMILY · {step}/3</p>
+      {existingFamily ? <>
+        <h1>你已經擁有家庭</h1>
+        <p className="account-login-error" role="alert">{error}</p>
+        <button type="button" className="primary" onClick={() => window.location.replace("/")}>進入我的家庭</button>
+      </> : <>
       {step === 1 && <>
         <h1>建立新的星星日記家庭</h1>
         <p>建立完成後，你會成為 Owner，並可邀請其他家長與孩子。</p>
@@ -107,6 +114,7 @@ function NewFamilyOnboarding({ account }: { account: SignedInUser }) {
         <h1>你的星星日記已建立完成</h1>
         <p>現在可以直接使用，也可以先設定每日任務。</p>
         <div className="no-family-actions"><button type="button" className="primary" onClick={() => window.location.replace("/?setup=dailyTasks")}>開始設定任務</button><button type="button" className="secondary" onClick={() => window.location.replace("/")}>前往首頁</button></div>
+      </>}
       </>}
     </section>
   </main>;

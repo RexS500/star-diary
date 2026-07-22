@@ -41,6 +41,7 @@ import { calculateChildStarBalance, logStarBalanceDebug, reconcileChildStarBalan
 import { AccountManagement } from "./account-management";
 import { APP_DATA_REFRESH_EVENT, type AppDataRefreshDetail, type AppRefreshResult } from "./app-refresh";
 import { PullToRefresh } from "./pull-to-refresh";
+import { encodeCanvasAsStoredWebp, prepareImageForCrop } from "./client-image-processing";
 import {
     buildGraduatedHabitMetrics,
     buildTaskHealthMetrics,
@@ -231,6 +232,11 @@ const SECURITY_QUESTIONS=[
     {value:"custom",label:"自訂問題"},
 ];
 const rewardImageIdentity=(value:string)=>value.replace(/([?&])v=[^&]*/g,"").replace(/[?&]$/,"");
+function rewardLibraryAfterReplacement(state:State,rewardId:string,previousImage?:string){
+    if(!previousImage)return state.rewardIconLibrary;
+    const previousIdentity=rewardImageIdentity(previousImage),stillUsed=state.rewards.some(reward=>reward.id!==rewardId&&rewardImageIdentity(reward.image||"")===previousIdentity);
+    return stillUsed?state.rewardIconLibrary:state.rewardIconLibrary.filter(asset=>rewardImageIdentity(asset.image)!==previousIdentity);
+}
 const now = () => new Date().toLocaleString("zh-TW", { hour12: false,timeZone:"Asia/Taipei" });
 const positiveInt = (value:unknown) => Math.max(1,Math.abs(Math.floor(Number(value)||1)));
 const inputDate = (offset=0) => addCalendarDays(taipeiDateKey(),offset);
@@ -259,14 +265,13 @@ function CropModal({target,onCancel,onError,onConfirm}:{target:CropTarget;onCanc
     function pointerMove(e:ReactPointerEvent<HTMLDivElement>){if(!drag.current||drag.current.id!==e.pointerId)return;setOffset(clamp(drag.current.ox+e.clientX-drag.current.x,drag.current.oy+e.clientY-drag.current.y))}
     function changeZoom(next:number){const previous=zoom||1,nextSize={w:natural.w*base*next,h:natural.h*base*next},nextLimits={x:Math.abs(nextSize.w-frameSize.w)/2,y:Math.abs(nextSize.h-frameSize.h)/2};setZoom(next);setOffset(current=>{const scaled={x:current.x*next/previous,y:current.y*next/previous};return{x:Math.max(-nextLimits.x,Math.min(nextLimits.x,scaled.x)),y:Math.max(-nextLimits.y,Math.min(nextLimits.y,scaled.y))}})}
     async function finish(){const image=imageRef.current,frame=frameRef.current;if(!image||!frame||!natural.w)return;setBusy(true);try{
-        const output=isAvatar?512:900,outH=isAvatar?512:420,rect=frame.getBoundingClientRect(),ratio=output/rect.width,drawBase=(isAvatar?Math.max(rect.width/natural.w,rect.height/natural.h):Math.min(rect.width/natural.w,rect.height/natural.h))*zoom*ratio;
+        const output=512,outH=isAvatar?512:239,rect=frame.getBoundingClientRect(),ratio=output/rect.width,drawBase=(isAvatar?Math.max(rect.width/natural.w,rect.height/natural.h):Math.min(rect.width/natural.w,rect.height/natural.h))*zoom*ratio;
         const canvas=document.createElement("canvas");canvas.width=output;canvas.height=outH;const context=canvas.getContext("2d");if(!context)throw new Error("無法處理圖片");
         context.fillStyle="#f0f4fa";context.fillRect(0,0,output,outH);
         if(isAvatar){context.save();context.beginPath();context.arc(output/2,outH/2,output/2,0,Math.PI*2);context.clip()}
         context.drawImage(image,output/2+offset.x*ratio-natural.w*drawBase/2,outH/2+offset.y*ratio-natural.h*drawBase/2,natural.w*drawBase,natural.h*drawBase);
         if(isAvatar)context.restore();
-        const mime=isAvatar?"image/png":"image/jpeg",blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(result=>result?resolve(result):reject(new Error("無法輸出圖片")),mime,0.9));
-        await onConfirm(new File([blob],`${target.kind}-${Date.now()}.${isAvatar?"png":"jpg"}`,{type:mime,lastModified:Date.now()}));
+        await onConfirm(await encodeCanvasAsStoredWebp(canvas));
     }finally{setBusy(false)}}
     return <div className="modal-back"><section className="modal crop-modal"><button className="close" onClick={onCancel}>×</button><h2>{isAvatar?"選取大頭照範圍":"選取獎品圖片範圍"}</h2><p className="crop-help">拖曳圖片調整位置，使用下方滑桿放大或縮小。</p><div ref={frameRef} className={`crop-frame ${isAvatar?"circle":"rectangle"}`} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={()=>drag.current=null} onPointerCancel={()=>drag.current=null}>
         <img ref={imageRef} src={target.url} alt="待裁切圖片" onError={onError} onLoad={e=>setNatural({w:e.currentTarget.naturalWidth,h:e.currentTarget.naturalHeight})} style={base?{width:imageSize.w,height:imageSize.h,left:`calc(50% + ${offset.x}px)`,top:`calc(50% + ${offset.y}px)`}:undefined}/>{isAvatar&&<span className="circle-guide"/>}
@@ -1015,29 +1020,12 @@ export default function App({account}:{account:SignedInAccount}) {
         const next = { ...data, entries: [e, ...data.entries],specialRewards:!pending&&type==="special"?specialStock(data.specialRewards,title,count):data.specialRewards };
         return pending?submitPending("child_entry",e,next):persist(next);
     }
-    async function normalizeJpeg(f:File){
-        const bitmap=await createImageBitmap(f,{imageOrientation:"from-image"});
-        const scale=Math.min(1,1600/Math.max(bitmap.width,bitmap.height)),width=Math.max(1,Math.round(bitmap.width*scale)),height=Math.max(1,Math.round(bitmap.height*scale));
-        const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
-        const context=canvas.getContext("2d");if(!context){bitmap.close();throw new Error("無法處理圖片")}
-        context.drawImage(bitmap,0,0,width,height);bitmap.close();
-        const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(result=>result?resolve(result):reject(new Error("無法轉換圖片")),"image/jpeg",0.86));
-        const base=f.name.replace(/\.[^.]+$/,"")||"photo";
-        return new File([blob],`${base}.jpg`,{type:"image/jpeg",lastModified:Date.now()});
-    }
     async function uploadImage(f:File,kind:"avatar"|"reward"){
-        const extension=f.name.split(".").pop()?.toLowerCase()||"",inferredType:{[key:string]:string}={jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",webp:"image/webp",gif:"image/gif"};
-        if((f.type&&!f.type.startsWith("image/"))||(!f.type&&!inferredType[extension])){say("請選擇 JPG、JPEG、PNG 或 WebP 圖片");return null}
-        let uploadFile=f.type?f:new File([f],f.name,{type:inferredType[extension],lastModified:f.lastModified});
-        const isJpeg=uploadFile.type==="image/jpeg"||uploadFile.type==="image/jpg"||extension==="jpg"||extension==="jpeg";
-        if(isJpeg){
-            say("正在處理 JPEG 圖片…");
-            try{uploadFile=await normalizeJpeg(uploadFile)}catch{say("這張 JPEG 無法讀取，請換一張圖片再試");return null}
-        }
-        if(uploadFile.size>8*1024*1024){say("圖片請小於 8 MB");return null}
+        if(f.type!=="image/webp"||!f.name.toLowerCase().endsWith(".webp")){say("圖片尚未完成 WebP 安全處理");return null}
+        if(f.size>500*1024){say("壓縮後圖片必須小於 500 KB");return null}
         say("圖片上傳中…");
         try{
-            const fd=new FormData();fd.append("file",uploadFile);fd.append("kind",kind);
+            const fd=new FormData();fd.append("file",f);fd.append("kind",kind);
             const res=await authenticatedFetch("/api/media",{method:"POST",body:fd});
             const x=await res.json().catch(()=>({}));
             if(!res.ok||typeof x.url!=="string"){say(x.error||"圖片上傳失敗");return null}
@@ -1045,13 +1033,13 @@ export default function App({account}:{account:SignedInAccount}) {
         }catch{say("圖片上傳失敗，請檢查網路後再試");return null}
     }
     async function rewardFileHash(file:File){try{const bytes=await crypto.subtle.digest("SHA-256",await file.arrayBuffer());return Array.from(new Uint8Array(bytes)).map(value=>value.toString(16).padStart(2,"0")).join("")}catch{return undefined}}
-    async function uploadReward(file:File,id:string){const fingerprint=await rewardFileHash(file),reused=fingerprint?data.rewardIconLibrary.find(asset=>asset.hash===fingerprint):undefined,url=reused?.image||await uploadImage(file,"reward");if(!url)return;editSettings(current=>{const reward=current.rewards.find(item=>item.id===id);if(!reward)return current;const identity=rewardImageIdentity(url),exists=current.rewardIconLibrary.find(asset=>rewardImageIdentity(asset.image)===identity),asset=exists||{id:crypto.randomUUID(),name:reward.name.trim()?`${reward.name.trim()}圖片`:`自訂圖片 ${String(current.rewardIconLibrary.length+1).padStart(2,"0")}`,image:url,...(fingerprint?{hash:fingerprint}:{}),createdAt:new Date().toISOString()},library=exists?current.rewardIconLibrary:[...current.rewardIconLibrary,asset];return{...current,rewardIconLibrary:library,rewards:current.rewards.map(item=>item.id===id?{...item,image:url}:item)}});say(reused?"已套用圖示庫中的相同圖片，請按儲存":"圖片已加入「我的圖片」，請按儲存")}
-    function startCrop(file:File,kind:CropTarget["kind"],targetId:string){if(imageUploading)return say("已有圖片正在上傳，請稍候");const extension=file.name.split(".").pop()?.toLowerCase()||"",allowed=["jpg","jpeg","png","webp"],allowedTypes=["image/jpeg","image/jpg","image/pjpeg","image/png","image/webp"],type=file.type.toLowerCase();if((type&&!allowedTypes.includes(type))||(!type&&!allowed.includes(extension)))return say("請選擇 JPG、JPEG、PNG 或 WebP 圖片");if(file.size>40*1024*1024)return say("原始圖片請小於 40 MB");setCrop({file,kind,targetId,url:URL.createObjectURL(file)})}
+    async function uploadReward(file:File,id:string){const fingerprint=await rewardFileHash(file),reused=fingerprint?data.rewardIconLibrary.find(asset=>asset.hash===fingerprint):undefined,url=reused?.image||await uploadImage(file,"reward");if(!url)return;editSettings(current=>{const reward=current.rewards.find(item=>item.id===id);if(!reward)return current;const identity=rewardImageIdentity(url),prunedLibrary=rewardImageIdentity(reward.image||"")===identity?current.rewardIconLibrary:rewardLibraryAfterReplacement(current,id,reward.image),exists=prunedLibrary.find(asset=>rewardImageIdentity(asset.image)===identity),asset=exists||{id:crypto.randomUUID(),name:reward.name.trim()?`${reward.name.trim()}圖片`:`自訂圖片 ${String(prunedLibrary.length+1).padStart(2,"0")}`,image:url,...(fingerprint?{hash:fingerprint}:{}),createdAt:new Date().toISOString()},library=exists?prunedLibrary:[...prunedLibrary,asset];return{...current,rewardIconLibrary:library,rewards:current.rewards.map(item=>item.id===id?{...item,image:url}:item)}});say(reused?"已套用圖示庫中的相同圖片，請按儲存":"圖片已加入「我的圖片」，請按儲存")}
+    async function startCrop(file:File,kind:CropTarget["kind"],targetId:string){if(imageUploading)return say("已有圖片正在上傳，請稍候");setImageUploading(true);say("正在校正方向並移除圖片中繼資料…");try{const prepared=await prepareImageForCrop(file);setCrop({file:prepared,kind,targetId,url:URL.createObjectURL(prepared)})}catch(error){say(error instanceof Error?error.message:"這張圖片無法安全處理，請更換圖片")}finally{setImageUploading(false)}}
     function cancelCrop(){if(crop)URL.revokeObjectURL(crop.url);setCrop(null)}
     function cropError(){cancelCrop();say("這張圖片無法讀取，請改用 JPG、PNG 或 WebP")}
     async function saveCrop(file:File){const target=crop;if(!target)return;URL.revokeObjectURL(target.url);setCrop(null);setImageUploading(true);try{if(target.kind==="reward"){await uploadReward(file,target.targetId);return}const url=await uploadImage(file,"avatar");if(!url)return;editSettings(current=>({...current,children:current.children.map(item=>item.id===target.targetId?{...item,avatar:url}:item)}));say("大頭照已套用，請按儲存")}finally{setImageUploading(false)}}
-    function chooseBuiltinRewardIcon(id:string,icon:string){editSettings(current=>({...current,rewards:current.rewards.map(reward=>reward.id===id?{...reward,icon,image:undefined}:reward)}))}
-    function chooseUploadedRewardIcon(id:string,image:string){editSettings(current=>({...current,rewards:current.rewards.map(reward=>reward.id===id?{...reward,image}:reward)}))}
+    function chooseBuiltinRewardIcon(id:string,icon:string){editSettings(current=>{const reward=current.rewards.find(item=>item.id===id);return{...current,rewardIconLibrary:rewardLibraryAfterReplacement(current,id,reward?.image),rewards:current.rewards.map(item=>item.id===id?{...item,icon,image:undefined}:item)}})}
+    function chooseUploadedRewardIcon(id:string,image:string){editSettings(current=>{const reward=current.rewards.find(item=>item.id===id),same=rewardImageIdentity(reward?.image||"")===rewardImageIdentity(image);return{...current,rewardIconLibrary:same?current.rewardIconLibrary:rewardLibraryAfterReplacement(current,id,reward?.image),rewards:current.rewards.map(item=>item.id===id?{...item,image}:item)}})}
     function renderRewardIconPicker(reward:Reward){
         const uploadId=`reward-upload-${reward.id}`,selectedAsset=data.rewardIconLibrary.find(asset=>rewardImageIdentity(asset.image)===rewardImageIdentity(reward.image||"")),builtin=BUILTIN_REWARD_ICONS.find(item=>item.value===reward.icon),icons=builtin||!reward.icon?BUILTIN_REWARD_ICONS:[{value:reward.icon,name:"原有圖示"},...BUILTIN_REWARD_ICONS];
         return <div className="reward-media-control"><div className={`reward-current-preview${reward.image?" has-image":""}`}>{reward.image?<img src={reward.image} alt={`${reward.name}目前圖片`}/>:<span aria-label={builtin?.name||"目前圖示"}>{reward.icon||"🎁"}</span>}</div><div className="reward-media-actions"><details className="reward-icon-picker"><summary aria-label={`選擇「${reward.name}」的圖示`}><span className="picker-current">{reward.image?<img src={reward.image} alt=""/>:<b>{reward.icon||"🎁"}</b>}<span>{reward.image?(selectedAsset?.name||"我的圖片"):(builtin?.name||"原有圖示")}</span></span><span className="picker-prompt">選擇圖示⌄</span></summary><div className="reward-icon-menu"><h4>內建圖示</h4><div className="builtin-icon-options">{icons.map(item=><button type="button" key={item.value} aria-pressed={!reward.image&&reward.icon===item.value} onClick={event=>{chooseBuiltinRewardIcon(reward.id,item.value);event.currentTarget.closest("details")?.removeAttribute("open")}}><span className="builtin-option-icon" aria-hidden="true">{item.value}</span><span>{item.name}</span></button>)}</div><h4>我的圖片</h4>{data.rewardIconLibrary.length?<div className="uploaded-icon-options">{data.rewardIconLibrary.map(asset=><button type="button" key={asset.id} aria-pressed={rewardImageIdentity(reward.image||"")===rewardImageIdentity(asset.image)} onClick={event=>{chooseUploadedRewardIcon(reward.id,asset.image);event.currentTarget.closest("details")?.removeAttribute("open")}}><img src={asset.image} alt=""/><span>{asset.name}</span></button>)}</div>:<p className="icon-library-empty">上傳圖片後，會自動保存在這裡供所有獎品使用。</p>}</div></details><label className="reward-upload-action" htmlFor={uploadId}>＋ 上傳圖片</label><input id={uploadId} className="file-input" type="file" accept="image/*" onChange={event=>{const file=event.currentTarget.files?.[0];event.currentTarget.value="";if(file)startCrop(file,"reward",reward.id)}}/></div></div>;

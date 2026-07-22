@@ -1,16 +1,11 @@
 export type MediaKind = "avatars" | "rewards";
 
-export function safeMediaFilename(value: string) {
-  return value.replace(/[^a-zA-Z0-9._-]/g, "").slice(-100) || "image";
-}
-
 export function buildFamilyMediaKey(
   familyId: string,
   kind: MediaKind,
-  filename: string,
   id = crypto.randomUUID(),
 ) {
-  return `families/${familyId}/${kind}/${id}-${safeMediaFilename(filename)}`;
+  return `families/${familyId}/${kind}/${id}.webp`;
 }
 
 export function mediaKeyBelongsToFamily(key: string, familyId: string) {
@@ -37,4 +32,20 @@ export function stateReferencesMediaKey(value: unknown, key: string): boolean {
     return Object.values(value as Record<string, unknown>).some(item => stateReferencesMediaKey(item, key));
   }
   return false;
+}
+
+export function mediaKeysInState(value: unknown, keys = new Set<string>()): Set<string> {
+  if (typeof value === "string") {
+    const key = mediaKeyFromUrl(value);
+    if (key) keys.add(key);
+    return keys;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) mediaKeysInState(item, keys);
+    return keys;
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value as Record<string, unknown>)) mediaKeysInState(item, keys);
+  }
+  return keys;
 }

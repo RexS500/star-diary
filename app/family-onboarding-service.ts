@@ -4,8 +4,10 @@ import { findFamilyForAuthenticatedUser, type FamilyAccess } from "./family-acce
 import { recordOperationalEvent } from "./operations-telemetry";
 
 export class FamilyOnboardingError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  constructor(message: string, public status = 400, public code?: string) { super(message); }
 }
+
+export const FAMILY_CREATION_LIMIT_MESSAGE = "每個 Google 帳號只能建立一個家庭。";
 
 type CreateFamilyInput = {
   familyName: unknown;
@@ -33,6 +35,12 @@ function initialFamilyState(child: { id: string; name: string; gender: "boy" | "
 }
 
 export async function createFamilyAndOwner(user: FamilyAccess["user"], input: CreateFamilyInput) {
+  const ownedFamily = await env.DB.prepare(
+    "SELECT id FROM families WHERE created_by_user_id = ? LIMIT 1",
+  ).bind(user.id).first<{ id: string }>();
+  if (ownedFamily) {
+    throw new FamilyOnboardingError(FAMILY_CREATION_LIMIT_MESSAGE, 409, "FAMILY_CREATION_LIMIT");
+  }
   if (await findFamilyForAuthenticatedUser(user)) {
     throw new FamilyOnboardingError("此 Google 帳號已經是家庭成員，將直接開啟原本家庭。", 409);
   }
@@ -63,8 +71,11 @@ export async function createFamilyAndOwner(user: FamilyAccess["user"], input: Cr
     if (results.some(result => result.success === false)) throw new Error("D1 batch failed");
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (/unique|constraint/i.test(message)) {
-      throw new FamilyOnboardingError("此 Google 帳號已經建立或加入家庭，請重新整理。", 409);
+    if (/families_created_by_user_unique|families\.created_by_user_id/i.test(message)) {
+      throw new FamilyOnboardingError(FAMILY_CREATION_LIMIT_MESSAGE, 409, "FAMILY_CREATION_LIMIT");
+    }
+    if (/family_members_user_unique|family_members\.user_id|unique|constraint/i.test(message)) {
+      throw new FamilyOnboardingError("此 Google 帳號已經建立或加入家庭，請重新整理。", 409, "FAMILY_MEMBERSHIP_EXISTS");
     }
     throw new FamilyOnboardingError("建立家庭失敗，請檢查網路後再試。", 500);
   }
@@ -89,5 +100,6 @@ export async function createFamilyAndOwner(user: FamilyAccess["user"], input: Cr
 export function familyOnboardingErrorResponse(error: unknown) {
   const status = error instanceof FamilyOnboardingError ? error.status : 500;
   const message = error instanceof FamilyOnboardingError ? error.message : "建立家庭失敗，請稍後再試。";
-  return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store, private" } });
+  const code = error instanceof FamilyOnboardingError ? error.code : undefined;
+  return Response.json({ error: message, ...(code ? { code } : {}) }, { status, headers: { "Cache-Control": "no-store, private" } });
 }
