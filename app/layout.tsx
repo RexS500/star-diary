@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { PwaManager } from "./pwa-manager";
+import { SiteFooter } from "./site-footer";
 
 export const metadata: Metadata = {
   title: "星星日記｜家庭獎勵追蹤",
@@ -39,5 +40,5 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({children}:{children:React.ReactNode}) {
-  return <html lang="zh-Hant"><head><meta name="theme-color" content="#2563a6"/><meta name="mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="apple-mobile-web-app-title" content="星星日記"/></head><body>{children}<PwaManager/></body></html>;
+  return <html lang="zh-Hant"><head><meta name="theme-color" content="#2563a6"/><meta name="mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="apple-mobile-web-app-title" content="星星日記"/></head><body>{children}<SiteFooter/><PwaManager/></body></html>;
 }

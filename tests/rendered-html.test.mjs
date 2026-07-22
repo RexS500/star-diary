@@ -136,7 +136,7 @@ test("range analytics share real child records across both modes and responsive 
   assert.match(home, /每日星星變化/);
   assert.match(home, /星星來源分析/);
   assert.match(home, /兌換統計/);
-  assert.match(home, /<Analytics data=\{data\} child=\{child\}/);
+  assert.match(home, /<Analytics(?: key=\{child\.id\})? data=\{data\} child=\{child\}/);
   assert.match(home, /上週＋本週/);
   assert.match(home, /最近 30 天/);
   assert.match(home, /刷新並匯出中/);
